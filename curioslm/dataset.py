@@ -1,0 +1,51 @@
+"""
+Dataset access: the data/<name>/ layout, tokenizer, and batch sampling.
+
+All datasets are GPT-2 BPE-encoded (tiktoken) 
+"""
+
+import os
+
+import numpy as np
+import torch
+
+from . import runtime
+
+
+def data_dir(name):
+    return runtime.project_path('data', name)
+
+
+def encoder_decoder():
+    """(encode, decode) using GPT-2 BPE — the only tokenizer this project uses."""
+    import tiktoken
+    enc = tiktoken.get_encoding('gpt2')
+    return (lambda s: enc.encode(s, allowed_special={'<|endoftext|>'}),
+            lambda l: enc.decode(l))
+
+
+def make_get_batch(name, block_size, batch_size, device, device_type):
+    """Build a get_batch(split) sampler.
+
+    Takes its settings as arguments rather than reading module globals the way the
+    original closure did, so a sweep can hold several samplers — different block
+    sizes, different datasets — alive in one process.
+    """
+    directory = data_dir(name)
+
+    def get_batch(split):
+        # Reopen the memmap every call rather than holding one open: see
+        # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
+        data = np.memmap(os.path.join(directory, f'{split}.bin'), dtype=np.uint16, mode='r')
+        ix = torch.randint(len(data) - block_size, (batch_size,))
+        x = torch.stack([torch.from_numpy((data[i:i + block_size]).astype(np.int64)) for i in ix])
+        y = torch.stack([torch.from_numpy((data[i + 1:i + 1 + block_size]).astype(np.int64)) for i in ix])
+        if device_type == 'cuda':
+            # pinned memory can be copied to the GPU asynchronously
+            x = x.pin_memory().to(device, non_blocking=True)
+            y = y.pin_memory().to(device, non_blocking=True)
+        else:
+            x, y = x.to(device), y.to(device)
+        return x, y
+
+    return get_batch
