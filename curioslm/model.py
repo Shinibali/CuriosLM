@@ -69,14 +69,21 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         assert config.n_embd % config.n_head == 0
 
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias = config.bias)
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias = config.bias)
-        self.attn_dropout = nn.Dropout(config.dropout)
-        self.resid_dropout = nn.Dropout(config.dropout)
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+        self.num_kv_heads = config.num_kv_heads
         self.head_size = self.n_embd // self.n_head
+        assert config.n_head % config.num_kv_heads == 0
+
+        self.enable_gqa = self.num_kv_heads != self.n_head
+        self.kv_size = self.num_kv_heads * self.head_size
+
+        # for the c_attn out, Q stays as is for each head + 2 is for K and V weights
+        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * self.kv_size, bias = config.bias) 
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias = config.bias)
+        self.attn_dropout = nn.Dropout(config.dropout)
+        self.resid_dropout = nn.Dropout(config.dropout)
 
         self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta) if config.use_rope else None
 
@@ -86,11 +93,11 @@ class CausalSelfAttention(nn.Module):
 
         B,T,C = x.size()
 
-        q, k, v = self.c_attn(x).split(self.n_embd, dim=-1) # B,T,ne
-
+        q,k,v = self.c_attn(x).split([self.n_embd, self.kv_size, self.kv_size], dim=-1) # (B,T, ne), 2(B,T, kv_size)
+        
         q = q.view(B, T, self.n_head, self.head_size).transpose(1, 2) # B, nh, T, hs
-        k = k.view(B, T, self.n_head, self.head_size).transpose(1, 2) # B, nh, T, hs
-        v = v.view(B, T, self.n_head, self.head_size).transpose(1, 2) # B, nh, T, hs
+        k = k.view(B, T, self.num_kv_heads, self.head_size).transpose(1, 2) # B, nkvh, T, hs
+        v = v.view(B, T, self.num_kv_heads, self.head_size).transpose(1, 2) # B, nkvh, T, hs
 
         if self.rope is not None:
             q, k = self.rope(q,k) # rotated q, k for every (x_i, x_{i+d/2}) dimension pair
@@ -101,7 +108,7 @@ class CausalSelfAttention(nn.Module):
         # attn = self.attn_dropout(attn)
         # y = attn @ v # B, nh, T, hs
 
-        y = F.scaled_dot_product_attention(q,k,v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True) # B, nh, T, hs
+        y = F.scaled_dot_product_attention(q,k,v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True, enable_gqa=self.enable_gqa) # B, nh, T, hs
 
         y = y.transpose(1, 2).contiguous().view(B,T,C) 
 

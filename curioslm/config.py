@@ -31,6 +31,7 @@ class GPTConfig:
                        # kept for Model A's apples-to-apples fidelity to vanilla nanoGPT
     position_encoding: Literal["absolute", "rope"] = "absolute" # Either absolute or RoPE positional encodings turns on
     rope_theta: float = 10000 # from paper Eq 15: https://arxiv.org/pdf/2104.09864
+    n_kv_head: int | None = None # None = regular MHA (n_kv_head == n_head)
 
     # Single source of truth for the position_encoding decision — every other module reads
     # these instead of comparing against the raw string itself, so the comparison only ever
@@ -42,6 +43,10 @@ class GPTConfig:
     @property
     def use_absolute_pos(self) -> bool:
         return not self.use_rope
+
+    @property
+    def num_kv_heads(self) -> int:
+        return self.n_kv_head or self.n_head
 
 
 @dataclass
