@@ -14,7 +14,7 @@ globals, so the dataclasses are only a declaration layer, not a runtime object g
 """
 
 from dataclasses import dataclass, asdict, fields
-
+from typing import Literal
 
 @dataclass
 class GPTConfig:
@@ -27,7 +27,21 @@ class GPTConfig:
     n_head: int = 4#12
     n_embd: int = 124#768
     dropout: float = 0.0 # 0 is good for pretraining, try 0.1+ for finetuning
-    bias: bool = False # bias in Linears and Layernorm
+    bias: bool = True # bias in Linears and LayerNorm — True matches Karpathy's actual GPT-2 default,
+                       # kept for Model A's apples-to-apples fidelity to vanilla nanoGPT
+    position_encoding: Literal["absolute", "rope"] = "absolute" # Either absolute or RoPE positional encodings turns on
+    rope_theta: float = 10000 # from paper Eq 15: https://arxiv.org/pdf/2104.09864
+
+    # Single source of truth for the position_encoding decision — every other module reads
+    # these instead of comparing against the raw string itself, so the comparison only ever
+    # lives in one place.
+    @property
+    def use_rope(self) -> bool:
+        return self.position_encoding == "rope"
+
+    @property
+    def use_absolute_pos(self) -> bool:
+        return not self.use_rope
 
 
 @dataclass

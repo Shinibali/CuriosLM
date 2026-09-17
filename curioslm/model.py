@@ -11,6 +11,58 @@ from torch.nn import functional as F
 
 from .config import GPTConfig # architecture knobs live in config.py, with everything else
 
+
+def build_rope_cache(head_size, block_size, theta=10000):
+    # RoPE Eq 15: https://arxiv.org/pdf/2104.09864 for rotating embedding dimension pair
+    # theta_i = rope_theta ** (-2i / head_size)   for i = 0, 1, ..., head_size/2 - 1
+
+    inv_freq = theta ** (-2.0 * torch.arange(head_size//2, dtype=torch.float32) / head_size) # (hs/2)
+
+    # Eq. 34 for cos and sin implementation for (block size m, head_size//2) angles
+    # R = x * cos (m*theta) +  x_mod * sin (m*theta)
+
+    m = torch.arange(block_size, dtype=torch.float32) # (T)
+
+    m_theta = torch.outer(m, inv_freq) # (T, hs/2)
+
+    return torch.cos(m_theta), torch.sin(m_theta) # (T, hs/2)
+
+
+class RotaryEmbedding(nn.Module):
+    def __init__(self, head_size, block_size, theta):
+        super().__init__()
+
+        cosines, sines = build_rope_cache(head_size, block_size, theta) # (T, hs/2)
+        full_cosines = torch.cat((cosines, cosines), dim=-1) # (T, hs)
+        full_sines = torch.cat((sines, sines), dim=-1) # (T, hs)
+
+        assert head_size % 2 == 0, "Head_size needs to be even for ROPE to work with pair-wise embedding rotation"
+
+        self.register_buffer("rope_cosines", full_cosines, persistent=False) # (T, hs)
+        self.register_buffer("rope_sines", full_sines, persistent=False) # (T, hs)
+
+    @staticmethod
+    def _rotate_half(x):
+        first, second = torch.chunk(x, 2, dim=-1) # split into 2 chunks
+        return torch.cat((-second, first), dim=-1)
+
+    def forward(self, q, k):
+
+        B, nh, T, hs = q.size()
+        assert T <= self.rope_cosines.size(0), "Seq len should be smaller than block size"
+        
+        rope_cosines = self.rope_cosines[:T, :].to(dtype=q.dtype) # (T, hs), change dtype to that of q for optimal compile
+        rope_sines = self.rope_sines[:T, :].to(dtype=q.dtype) # (T, hs)
+
+        # note this is different than the paper https://arxiv.org/pdf/2104.09864 interleaved style. 
+        # It is "GPT-NeoX style" for (x_i, x_{i+d/2}) instead of (x_{2i-1}, x_{2i}) dimension pair rotation. 
+        # Does not change the outcome, unless mixing weights with other interleaved/"GPT-J style" models from HF
+        q_rotated = q * rope_cosines + self._rotate_half(q) * rope_sines # B, nh, T, hs
+        k_rotated = k * rope_cosines + self._rotate_half(k) * rope_sines # B, nh, T, hs
+
+        return q_rotated, k_rotated
+
+
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
@@ -24,23 +76,28 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+        self.head_size = self.n_embd // self.n_head
+
+        self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta) if config.use_rope else None
 
         # self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
 
     def forward(self, x):
 
         B,T,C = x.size()
-        head_size = C // self.n_head
 
         q, k, v = self.c_attn(x).split(self.n_embd, dim=-1) # B,T,ne
 
-        q = q.view(B, T, self.n_head, head_size).transpose(1, 2) # B, nh, T, hs
-        k = k.view(B, T, self.n_head, head_size).transpose(1, 2) # B, nh, T, hs
-        v = v.view(B, T, self.n_head, head_size).transpose(1, 2) # B, nh, T, hs
+        q = q.view(B, T, self.n_head, self.head_size).transpose(1, 2) # B, nh, T, hs
+        k = k.view(B, T, self.n_head, self.head_size).transpose(1, 2) # B, nh, T, hs
+        v = v.view(B, T, self.n_head, self.head_size).transpose(1, 2) # B, nh, T, hs
+
+        if self.rope is not None:
+            q, k = self.rope(q,k) # rotated q, k for every (x_i, x_{i+d/2}) dimension pair
 
         # attn = q @ k.transpose(-2,-1) / math.sqrt(k.size(-1)) # B, nh, T, T
         # attn = attn.masked_fill(self.bias[:,:,:T,:T] == 0, float('inf'))
-        # attn = F.softmas(attn, dim=-1)
+        # attn = F.softmax(attn, dim=-1)
         # attn = self.attn_dropout(attn)
         # y = attn @ v # B, nh, T, hs
 
@@ -92,17 +149,19 @@ class GPT(nn.Module):
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = nn.LayerNorm(config.n_embd, bias=config.bias),
         ))
+        if config.use_absolute_pos:
+            self.transformer['wpe'] = nn.Embedding(config.block_size, config.n_embd)
+
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         # set wte weight same as lm_head weight
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
-        self.apply(self.__init_weights)
+        self.apply(self._init_weights)
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std = 0.02/math.sqrt(2*config.n_layer))
@@ -117,11 +176,11 @@ class GPT(nn.Module):
         params are actually used as weights in the final layer, so we include them.
         """
         n_params = sum(p.numel() for p in self.parameters())
-        if non_embedding:
+        if non_embedding and hasattr(self.transformer, 'wpe'):
             n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
-    def __init_weights(self, module):
+    def _init_weights(self, module):
         if isinstance(module, nn.Linear) or isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if isinstance(module, nn.Linear) and module.bias is not None:
@@ -133,12 +192,16 @@ class GPT(nn.Module):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"input seq len {t} is larger than model context len {self.config.block_size}"
-        pos = torch.arange(0,t,dtype = torch.long, device=device) # (t)
 
         token_emb = self.transformer.wte(idx) # b,t,ne
-        pos_emb = self.transformer.wpe(pos) # t,ne
 
-        x = self.transformer.drop(token_emb + pos_emb) # b,t,ne
+        if self.config.use_absolute_pos:
+            pos = torch.arange(0,t,dtype = torch.long, device=device) # (t)
+            pos_emb = self.transformer.wpe(pos) # t,ne
+            x = self.transformer.drop(token_emb + pos_emb) # b,t,ne
+        else:
+            x = self.transformer.drop(token_emb) # b,t,ne
+
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x) # b,t,ne
