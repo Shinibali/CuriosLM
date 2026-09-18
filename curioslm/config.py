@@ -32,6 +32,8 @@ class GPTConfig:
     position_encoding: Literal["absolute", "rope"] = "absolute" # Either absolute or RoPE positional encodings turns on
     rope_theta: float = 10000 # from paper Eq 15: https://arxiv.org/pdf/2104.09864
     n_kv_head: int | None = None # None = regular MHA (n_kv_head == n_head)
+    mlp_type: Literal["gelu", "geglu"] = "gelu"
+    norm_placement: Literal["pre", "sandwich"] = "pre"
 
     # Single source of truth for the position_encoding decision — every other module reads
     # these instead of comparing against the raw string itself, so the comparison only ever
@@ -47,6 +49,14 @@ class GPTConfig:
     @property
     def num_kv_heads(self) -> int:
         return self.n_kv_head or self.n_head
+
+    @property
+    def use_gelu_activation(self) -> bool:
+        return self.mlp_type == "gelu"
+
+    @property
+    def use_sandwich_norm(self) -> bool:
+        return self.norm_placement == "sandwich"
 
 
 @dataclass

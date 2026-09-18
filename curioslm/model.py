@@ -62,6 +62,14 @@ class RotaryEmbedding(nn.Module):
 
         return q_rotated, k_rotated
 
+# The nn.RMSNorm dircet usage was throwing error with dtype mismatch, hence this wrapper to take care of dtypes
+class RMSNormFP32(nn.Module):
+    def __init__(self, n_embd, eps=1e-5):
+        super().__init__()
+        self.norm = nn.RMSNorm(n_embd, eps=eps)
+
+    def forward(self, x):
+        return self.norm(x.float()).type_as(x)
 
 class CausalSelfAttention(nn.Module):
 
@@ -133,17 +141,51 @@ class MLP(nn.Module):
         return x
 
 
+class GeGLU(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        # In: ne, Out: 4ne * 2 for the gating + val of GeGLU
+        n_hidden = int(2/3 * 4 * config.n_embd) # this is my special construct to keep FFN # params comparable to GPT2 FFN # params
+        self.c_fc = nn.Linear(config.n_embd, n_hidden * 2 , bias=config.bias) # n -> 8n/3 * 2
+        self.gelu = nn.GELU()
+        self.c_proj = nn.Linear(n_hidden, config.n_embd, bias=config.bias) # 8n/3 -> n
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x):
+        gate, val = self.c_fc(x).chunk(2, dim=-1) # n -> 8n/3 * 2 -> 8n/3
+        x = self.gelu(gate) * val # 8n/3 -> 8n/3
+        x = self.c_proj(x) # 8n/3 -> n
+        x = self.dropout(x) # n -> n
+        return x
+
+
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.bias)
+
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
-        self.mlp = MLP(config)
+        self.mlp = MLP(config) if config.use_gelu_activation else GeGLU(config)
+        self.use_sandwich_norm = config.use_sandwich_norm
+
+        if self.use_sandwich_norm:
+            self.ln_1 = RMSNormFP32(config.n_embd, eps=1.0e-5)
+            self.ln_2 = RMSNormFP32(config.n_embd, eps=1.0e-5)
+            self.ln_3 = RMSNormFP32(config.n_embd, eps=1.0e-5)
+            self.ln_4 = RMSNormFP32(config.n_embd, eps=1.0e-5)
+        else:
+            self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.bias)
+            self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
 
     def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
+
+        if self.use_sandwich_norm:
+            x = x + self.ln_2(self.attn(self.ln_1(x)))
+            x = x + self.ln_4(self.mlp(self.ln_3(x)))
+        else:
+            x = x + self.attn(self.ln_1(x))
+            x = x + self.mlp(self.ln_2(x))
+
         return x
 
 class GPT(nn.Module):
@@ -158,10 +200,14 @@ class GPT(nn.Module):
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-            ln_f = nn.LayerNorm(config.n_embd, bias=config.bias),
         ))
         if config.use_absolute_pos:
             self.transformer['wpe'] = nn.Embedding(config.block_size, config.n_embd)
+
+        if config.use_sandwich_norm:
+            self.transformer["ln_f"] = RMSNormFP32(config.n_embd, eps=1.0e-5)
+        else:
+            self.transformer["ln_f"] = nn.LayerNorm(config.n_embd, bias=config.bias)
 
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
