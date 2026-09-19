@@ -44,10 +44,10 @@ def test_block_sandwich_norm_has_four_norms_pre_has_two():
     """
     base_kwargs = dict(n_embd=128, n_head=4, n_kv_head=2, n_layer=1, block_size=16, vocab_size=65)
 
-    sandwich_block = Block(GPTConfig(norm_placement="sandwich", **base_kwargs))
+    sandwich_block = Block(GPTConfig(norm_placement="sandwich", **base_kwargs), layer_idx=0)
     assert all(isinstance(getattr(sandwich_block, f"ln_{i}"), RMSNormFP32) for i in (1, 2, 3, 4))
 
-    pre_block = Block(GPTConfig(norm_placement="pre", **base_kwargs))
+    pre_block = Block(GPTConfig(norm_placement="pre", **base_kwargs), layer_idx=0)
     assert isinstance(pre_block.ln_1, torch.nn.LayerNorm)
     assert isinstance(pre_block.ln_2, torch.nn.LayerNorm)
     assert not hasattr(pre_block, "ln_3")

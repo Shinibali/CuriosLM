@@ -42,7 +42,7 @@ def test_causal_self_attention_gqa_shapes():
         n_head=n_head, n_kv_head=n_kv_head, n_embd=n_embd,
         n_layer=1, block_size=16, vocab_size=65,
     )
-    attn = CausalSelfAttention(config)
+    attn = CausalSelfAttention(config, layer_idx=0)
 
     expected_c_attn_out = n_embd + 2 * (n_kv_head * head_size)
     assert attn.c_attn.out_features == expected_c_attn_out, (
@@ -62,7 +62,7 @@ def test_causal_self_attention_mha_equivalent_when_kv_heads_match():
     """
     n_head, n_embd = 4, 32
     config = GPTConfig(n_head=n_head, n_kv_head=None, n_embd=n_embd, n_layer=1, block_size=16, vocab_size=65)
-    attn = CausalSelfAttention(config)
+    attn = CausalSelfAttention(config, layer_idx=0)
 
     assert attn.enable_gqa is False
     assert attn.c_attn.out_features == 3 * n_embd

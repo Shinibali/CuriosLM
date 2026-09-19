@@ -19,7 +19,8 @@ batch_size = 64
 block_size = 256 # context of up to 256 previous BPE tokens
 
 # baby GPT model :)
-n_layer = 4
+n_layer = 8
+attention_window = 4
 n_head = 4
 n_kv_head = n_head // 4 # 4:1 Q to KV heads # needs declaration here since GPTconfig class has default None, so cli argument fails
 n_embd = n_head * 32 # 128

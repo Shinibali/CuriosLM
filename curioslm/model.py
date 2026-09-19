@@ -62,7 +62,7 @@ class RotaryEmbedding(nn.Module):
 
         return q_rotated, k_rotated
 
-# The nn.RMSNorm dircet usage was throwing error with dtype mismatch, hence this wrapper to take care of dtypes
+# The nn.RMSNorm direct usage was throwing error with dtype mismatch, hence this wrapper to take care of dtypes
 class RMSNormFP32(nn.Module):
     def __init__(self, n_embd, eps=1e-5):
         super().__init__()
@@ -73,9 +73,21 @@ class RMSNormFP32(nn.Module):
 
 class CausalSelfAttention(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config, layer_idx):
         super().__init__()
         assert config.n_embd % config.n_head == 0
+
+        self.is_global_layer = config.is_global_layer(layer_idx)
+
+        if not self.is_global_layer:
+            # Local layers need an explicit causal+window mask. Global layers skip this
+            # entirely and use SDPA's native is_causal=True fast path 
+            idx = torch.arange(config.block_size)
+            # idx.unsqueeze(1) reshapes idx from (block_size,) to (block_size, 1) -- q
+            # idx.unsqueeze(0) reshapes to (1, block_size) -- k. Comparing them triggers broadcasting:
+            causal = idx.unsqueeze(1) >= idx.unsqueeze(0)  # (block_size, block_size): kv_idx <= q_idx
+            windowed = (idx.unsqueeze(1) - idx.unsqueeze(0)) < config.attention_window  # q_idx - window < kv_idx
+            self.register_buffer("window_mask", causal & windowed, persistent=False)
 
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -95,14 +107,12 @@ class CausalSelfAttention(nn.Module):
 
         self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta) if config.use_rope else None
 
-        # self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
-
     def forward(self, x):
 
         B,T,C = x.size()
 
         q,k,v = self.c_attn(x).split([self.n_embd, self.kv_size, self.kv_size], dim=-1) # (B,T, ne), 2(B,T, kv_size)
-        
+
         q = q.view(B, T, self.n_head, self.head_size).transpose(1, 2) # B, nh, T, hs
         k = k.view(B, T, self.num_kv_heads, self.head_size).transpose(1, 2) # B, nkvh, T, hs
         v = v.view(B, T, self.num_kv_heads, self.head_size).transpose(1, 2) # B, nkvh, T, hs
@@ -110,15 +120,13 @@ class CausalSelfAttention(nn.Module):
         if self.rope is not None:
             q, k = self.rope(q,k) # rotated q, k for every (x_i, x_{i+d/2}) dimension pair
 
-        # attn = q @ k.transpose(-2,-1) / math.sqrt(k.size(-1)) # B, nh, T, T
-        # attn = attn.masked_fill(self.bias[:,:,:T,:T] == 0, float('inf'))
-        # attn = F.softmax(attn, dim=-1)
-        # attn = self.attn_dropout(attn)
-        # y = attn @ v # B, nh, T, hs
+        if self.is_global_layer:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
+        else:
+            window_mask = self.window_mask[:T, :T] # (T, T), sliced down from the block_size buffer
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=window_mask, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
 
-        y = F.scaled_dot_product_attention(q,k,v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True, enable_gqa=self.enable_gqa) # B, nh, T, hs
-
-        y = y.transpose(1, 2).contiguous().view(B,T,C) 
+        y = y.transpose(1, 2).contiguous().view(B,T,C)
 
         y = self.resid_dropout(self.c_proj(y))
         return y
@@ -161,18 +169,18 @@ class GeGLU(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer_idx):
         super().__init__()
 
-        self.attn = CausalSelfAttention(config)
+        self.attn = CausalSelfAttention(config, layer_idx)
         self.mlp = MLP(config) if config.use_gelu_activation else GeGLU(config)
         self.use_sandwich_norm = config.use_sandwich_norm
 
         if self.use_sandwich_norm:
-            self.ln_1 = RMSNormFP32(config.n_embd, eps=1.0e-5)
-            self.ln_2 = RMSNormFP32(config.n_embd, eps=1.0e-5)
-            self.ln_3 = RMSNormFP32(config.n_embd, eps=1.0e-5)
-            self.ln_4 = RMSNormFP32(config.n_embd, eps=1.0e-5)
+            self.ln_1 = RMSNormFP32(config.n_embd)
+            self.ln_2 = RMSNormFP32(config.n_embd)
+            self.ln_3 = RMSNormFP32(config.n_embd)
+            self.ln_4 = RMSNormFP32(config.n_embd)
         else:
             self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.bias)
             self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
@@ -199,13 +207,13 @@ class GPT(nn.Module):
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+            h = nn.ModuleList([Block(config, layer_idx) for layer_idx in range(config.n_layer)]),
         ))
         if config.use_absolute_pos:
             self.transformer['wpe'] = nn.Embedding(config.block_size, config.n_embd)
 
         if config.use_sandwich_norm:
-            self.transformer["ln_f"] = RMSNormFP32(config.n_embd, eps=1.0e-5)
+            self.transformer["ln_f"] = RMSNormFP32(config.n_embd)
         else:
             self.transformer["ln_f"] = nn.LayerNorm(config.n_embd, bias=config.bias)
 

@@ -29,11 +29,20 @@ class GPTConfig:
     dropout: float = 0.0 # 0 is good for pretraining, try 0.1+ for finetuning
     bias: bool = True # bias in Linears and LayerNorm — True matches Karpathy's actual GPT-2 default,
                        # kept for Model A's apples-to-apples fidelity to vanilla nanoGPT
+
     position_encoding: Literal["absolute", "rope"] = "absolute" # Either absolute or RoPE positional encodings turns on
     rope_theta: float = 10000 # from paper Eq 15: https://arxiv.org/pdf/2104.09864
+
     n_kv_head: int | None = None # None = regular MHA (n_kv_head == n_head)
+
     mlp_type: Literal["gelu", "geglu"] = "gelu"
     norm_placement: Literal["pre", "sandwich"] = "pre"
+
+    attention_window: int | None = None  # None means full global attention, no windowing
+    local_global_ratio: int = 5  # 1 in every N layers is global; Gemma 3's convention
+
+    def is_global_layer(self, layer_idx: int) -> bool:
+        return self.attention_window is None or (layer_idx % self.local_global_ratio == 0)
 
     # Single source of truth for the position_encoding decision — every other module reads
     # these instead of comparing against the raw string itself, so the comparison only ever
