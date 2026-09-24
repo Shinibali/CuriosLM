@@ -6,7 +6,7 @@ import torch
 
 from curioslm import checkpoints, runtime
 from curioslm import config as cfg
-from curioslm import dataset as data
+from curioslm.loaders import dataset as data
 from curioslm.model import GPT
 
 # -----------------------------------------------------------------------------

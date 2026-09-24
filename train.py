@@ -8,7 +8,7 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from curioslm import checkpoints, runtime
 from curioslm import config as cfg
-from curioslm import dataset as data
+from curioslm.loaders import dataset as data
 from curioslm.config import GPTConfig
 from curioslm.model import GPT
 

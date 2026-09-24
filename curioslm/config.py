@@ -70,7 +70,13 @@ class GPTConfig:
 
 @dataclass
 class DataConfig:
-    dataset: str = 'shakespeare' # directory under data/
+    dataset: str = 'fineweb_edu' # directory under data/ -- also the single source of truth
+                                  # for which dataset name hf_shards.py uploads/downloads
+    hf_repo_id: str = 'CuriosLM/fineweb-edu-shards' # private staging repo shards move through
+                                                     # between prepare.py (local) and training
+                                                     # (RunPod nodes) -- see prepare.py's docstring
+    shard_size: int = 100_000_000 # tokens/shard -- NOT independent of world_size*batch_size*
+                                   # block_size (OptimConfig/RuntimeConfig)
 
 
 @dataclass

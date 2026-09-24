@@ -9,7 +9,7 @@ import os
 import numpy as np
 import torch
 
-from . import runtime
+from .. import runtime
 
 
 def data_dir(name):

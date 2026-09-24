@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# training outputs — checkpoints are ~100MB each, never commit them
+out/
+out-*/
+*.pt
+*.ckpt
+
+# experiment logs
+wandb/
+runs/
+
+# tokenized datasets — regenerate with data/<dataset>/prepare.py
+*.bin
+*.npy
+.prepare_checkpoint.json
+**/data/**/input.txt
+
+# internal build-tracking docs — not portfolio content, see S1_REQUIREMENTS.md's own header
+LEARNING_PLAN.md
+TRAINING_COST_GUIDE.md
+S1_REQUIREMENTS.md
