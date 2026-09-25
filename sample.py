@@ -10,9 +10,7 @@ from curioslm.loaders import dataset as data
 from curioslm.model import GPT
 
 # -----------------------------------------------------------------------------
-# Annotations only — no values. globals().update() below is invisible to type
-# checkers, so these tell the IDE which settings this script accepts; the actual
-# defaults live in config.py.
+# annotations only, no values — globals().update() is invisible to type checkers
 start: str; num_samples: int; max_new_tokens: int; temperature: float; top_k: int
 device: str; dtype: str; compile: bool; seed: int; peak_flops_override: float
 
@@ -21,9 +19,9 @@ globals().update(cfg.flatten(
     cfg.SampleConfig(),  # start, num_samples, max_new_tokens, temperature, top_k
     cfg.RuntimeConfig(), # device, precision, compile, seed
 ))
-init_from = 'resume' # sampling defaults to a checkpoint, where IOConfig defaults to 'scratch'
+init_from = 'resume' # sampling defaults to a checkpoint; IOConfig defaults to 'scratch'
 out_dir = cfg.IOConfig().out_dir
-compile = False # override the training default: compiling costs ~a minute, sampling is short
+compile = False # compiling costs ~a minute, and sampling is short
 
 exec(open(runtime.package_path('configurator.py')).read()) # overrides from command line or config file
 # -----------------------------------------------------------------------------

@@ -5,11 +5,8 @@ from curioslm.model import GPT, CausalSelfAttention
 
 
 def test_is_global_layer_assignment_matches_ratio():
-    """
-    local_global_ratio=3 with 6 layers should make layers 0 and 3 global (index % ratio == 0),
-    the rest local -- and only local layers should carry a window_mask buffer at all, since
-    global layers use SDPA's is_causal=True path with no mask tensor.
-    """
+    """ratio=3 over 6 layers makes layers 0 and 3 global; only local layers carry a window_mask,
+    since global layers take SDPA's is_causal path with no mask tensor."""
     config = GPTConfig(
         n_embd=32, n_head=4, n_layer=6, block_size=16, vocab_size=65,
         attention_window=2, local_global_ratio=3,
@@ -35,10 +32,8 @@ def test_attention_window_none_makes_every_layer_global():
 
 
 def test_window_mask_matches_expected_causal_and_window_pattern():
-    """
-    Directly check the mask content, not just that it constructs: for window=2, each query
-    position should see itself and exactly 1 position back, and nothing before or after that.
-    """
+    """Mask content, not just that it constructs: window=2 means each query sees itself and
+    exactly one position back."""
     config = GPTConfig(
         n_embd=32, n_head=4, n_layer=1, block_size=6, vocab_size=65,
         attention_window=2, local_global_ratio=5,
@@ -58,11 +53,10 @@ def test_window_mask_matches_expected_causal_and_window_pattern():
 
 
 def test_local_global_model_forward_and_backward():
-    """
-    Full integration check on the thing that actually broke earlier: flex_attention has no
-    backward support on CPU/MPS, which is why this uses SDPA + a dense mask instead. Confirm
-    both a forward pass and a backward pass (loss.backward()) complete without error, and that
-    a shorter T than block_size (the generation-time case) also works.
+    """Forward and backward both complete, and a T shorter than block_size (generation) works.
+
+    The backward half matters because flex_attention has no CPU/MPS backward -- the reason this
+    path uses SDPA with a dense mask instead.
     """
     config = GPTConfig(
         n_embd=32, n_head=4, n_kv_head=2, n_layer=6, block_size=16, vocab_size=65,

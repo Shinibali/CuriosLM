@@ -4,26 +4,27 @@ import math
 
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed import init_process_group, destroy_process_group
+from torch.distributed import init_process_group, destroy_process_group, barrier
 
 from curioslm import checkpoints, runtime
 from curioslm import config as cfg
 from curioslm.loaders import dataset as data
 from curioslm.config import GPTConfig
 from curioslm.model import GPT
+from curioslm.loaders.shard_loader import ShardedDataLoader
+from curioslm.loaders.hf_shards import download_shards
 
 #-------------------------------------------------------------------
-# config: every default lives in config.py — see the group definitions there.
-# These become module globals so configurator.py can override them from the CLI:
+# config: defaults live in config.py, overridable from the CLI via configurator.py:
 #   python train.py config/train_shakespeare.py --batch_size=32 --device=mps
 #-------------------------------------------------------------------
 
-# Annotations only — no values. globals().update() is invisible to type checkers,
-# so these tell the IDE which settings this script accepts. Defaults are in config.py.
+# annotations only, no values — globals().update() is invisible to type checkers
 block_size: int; vocab_size: int; n_layer: int; n_head: int; n_embd: int
-dropout: float; bias: bool; dataset: str
+n_kv_head: int | None; attention_window: int | None
+dropout: float; bias: bool; dataset: str; hf_dataset_repo_id: str
 out_dir: str; init_from: str; eval_interval: int; log_interval: int; eval_iters: int
-eval_only: bool; always_save_checkpoint: bool
+eval_only: bool; always_save_checkpoint: bool; hf_checkpoint_repo_id: str
 wandb_log: bool; wandb_project: str; wandb_run_name: str
 gradient_accumulation_steps: int; batch_size: int; learning_rate: float; max_iters: int
 weight_decay: float; beta1: float; beta2: float; grad_clip: float
@@ -74,6 +75,15 @@ config.update(device=device, dtype=dtype, lr_decay_iters=lr_decay_iters)
 
 assert warmup_iters < max_iters, f"warmup_iters={warmup_iters} >= max_iters={max_iters}: lr would never decay"
 
+# A config file's derived architecture values (n_kv_head = n_head // 4, attention_window =
+# block_size // 2) are frozen when that file execs, before any --key= override lands. Catch the
+# combinations that would otherwise be silently wrong rather than loud.
+assert n_kv_head is None or n_head % n_kv_head == 0, \
+    f"n_head={n_head} not divisible by n_kv_head={n_kv_head}"
+assert attention_window is None or attention_window <= block_size, \
+    (f"attention_window={attention_window} > block_size={block_size}: every position falls inside "
+     "the window, so local layers silently become full causal attention")
+
 #-------------------------------------------------------------------
 # various inits, derived attributes, I/O setup
 #-------------------------------------------------------------------
@@ -96,12 +106,16 @@ else:
     master_process = True
     seed_offset = 0
     ddp_world_size = 1
+    ddp_rank = 0
+    ddp_local_rank = 0
 
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
 print(f"tokens per iteration will be: {tokens_per_iter:,}")
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
+    if init_from == 'scratch':
+        checkpoints.check_no_overwrite(os.path.join(out_dir, 'ckpt.pt'), wandb_run_name)
 
 torch.manual_seed(seed + seed_offset)
 runtime.enable_tf32()
@@ -119,6 +133,19 @@ if master_process:
 #-------------------------------------------------------------------
 
 get_batch = data.make_get_batch(dataset, block_size, batch_size, device, device_type)
+if dataset == 'fineweb_edu':
+    # ddp_local_rank == 0, not master_process: every node needs its own local copy, and
+    # master_process is true on only one process cluster-wide
+    if ddp_local_rank == 0:
+        download_shards(data.data_dir(dataset), hf_dataset_repo_id)
+    # other local ranks wait for rank 0's download instead of racing it
+    if ddp:
+        barrier()
+
+    train_loader = ShardedDataLoader( dataset, "train", block_size, batch_size, ddp_rank, ddp_world_size, device, device_type)
+    val_loader = ShardedDataLoader( dataset, "val", block_size, batch_size, ddp_rank, ddp_world_size, device, device_type)
+
+    get_batch = lambda x: train_loader.next_batch() if x == "train" else val_loader.next_batch()
 
 #-------------------------------------------------------------------
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -131,10 +158,7 @@ best_val_loss = 1e9
 # model init
 #-------------------------------------------------------------------
 
-# every GPTConfig field this script defines a value for. Built from
-# checkpoints.CONFIG_KEYS so a new architecture knob only has to be added to
-# GPTConfig, not repeated here. vocab_size comes from GPTConfig's own default
-# (50304, GPT-2's BPE vocab padded for efficiency) — every dataset is BPE-encoded.
+# built from checkpoints.CONFIG_KEYS so a new GPTConfig knob never needs repeating here
 model_args = {k: globals()[k] for k in checkpoints.CONFIG_KEYS if k in globals()}
 
 if init_from == 'scratch':
@@ -143,8 +167,15 @@ if init_from == 'scratch':
     model = GPT(gptconf)
 
 elif init_from == 'resume':
+    ckpt_path = os.path.join(out_dir, 'ckpt.pt')
+    if not os.path.exists(ckpt_path):
+        # not on this node's disk (fresh pod, or lost local state) -- pull it rather than fail
+        if ddp_local_rank == 0:
+            checkpoints.download_checkpoint(out_dir, hf_checkpoint_repo_id)
+        if ddp:
+            barrier()
     print(f"Resuming training from {out_dir}")
-    checkpoint = checkpoints.load(os.path.join(out_dir, 'ckpt.pt'), map_location=device)
+    checkpoint = checkpoints.load(ckpt_path, map_location=device)
     # architecture is fixed by the checkpoint; dropout stays as asked for on the command line
     model, model_args = checkpoints.build_model(checkpoint, overrides={'dropout': dropout})
     iter_num = checkpoint['iter_num']
@@ -240,6 +271,9 @@ while True:
                     model=raw_model, optimizer=optimizer, model_args=model_args,
                     iter_num=iter_num, best_val_loss=best_val_loss, config=config,
                 )
+                # get it off this pod's ephemeral disk immediately; async so a multi-GB
+                # upload never blocks the training loop
+                checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id)
     if iter_num == 0 and eval_only:
         break
 
@@ -247,10 +281,7 @@ while True:
     # and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
         if ddp:
-            # in DDP training we only need to sync gradients at the last micro step.
-            # the official way to do this is with model.no_sync() context manager, but
-            # I really dislike that this bloats the code and forces us to repeat code
-            # looking at the source of that context manager, it just toggles this variable
+            # only sync gradients on the last micro step; no_sync() just toggles this flag
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
             logits, loss = model(X, Y)
@@ -274,8 +305,7 @@ while True:
     dt = t1 - t0
     t0 = t1
     if iter_num % log_interval == 0 and master_process:
-        # get loss as float. note: this is a CPU-GPU sync point
-        # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
+        # CPU-GPU sync point; undo the grad-accum division to approximate the total loss
         lossf = loss.item() * gradient_accumulation_steps
         if local_iter_num >= 5 and flops_promised: # let the training loop settle a bit
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt, flops_promised)

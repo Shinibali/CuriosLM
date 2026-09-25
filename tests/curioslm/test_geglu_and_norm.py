@@ -7,11 +7,8 @@ from curioslm.model import GPT, Block, GeGLU, MLP, RMSNormFP32
 
 
 def test_geglu_matches_mlp_param_count():
-    """
-    The whole point of the 2/3*4x hidden-dim convention: GeGLU (3 matrices) should land
-    within a few params of plain MLP (2 matrices) at the same n_embd, not meaningfully
-    more or less -- otherwise Model A vs Model B stops being a fair size comparison.
-    """
+    """The 2/3*4x hidden-dim convention keeps GeGLU (3 matrices) within ~1% of plain MLP
+    (2 matrices) at the same n_embd, so swapping one for the other is size-neutral."""
     config = GPTConfig(n_embd=128, n_head=4, n_kv_head=2, n_layer=1, block_size=16, vocab_size=65)
     geglu_params = sum(p.numel() for p in GeGLU(config).parameters())
     mlp_params = sum(p.numel() for p in MLP(config).parameters())
@@ -21,11 +18,8 @@ def test_geglu_matches_mlp_param_count():
 
 
 def test_rmsnorm_fp32_computes_in_fp32_and_preserves_input_dtype():
-    """
-    RMSNormFP32 exists specifically to avoid nn.RMSNorm's dtype-mismatch fallback under
-    autocast (bf16 input, fp32 weight) -- verify it both runs warning-free under bf16 and
-    still hands back the same dtype it was given, so callers don't need to care.
-    """
+    """RMSNormFP32 avoids nn.RMSNorm's dtype-mismatch fallback under autocast: warning-free
+    on bf16 input, and hands back the dtype it was given."""
     norm = RMSNormFP32(64)
     x = torch.randn(2, 8, 64, dtype=torch.bfloat16)
 
@@ -38,10 +32,8 @@ def test_rmsnorm_fp32_computes_in_fp32_and_preserves_input_dtype():
 
 
 def test_block_sandwich_norm_has_four_norms_pre_has_two():
-    """
-    Sandwich norm wraps both sub-layers (attention, MLP) with pre- and post-norm each --
-    4 norm modules. Plain pre-norm only normalizes the input to each sub-layer -- 2.
-    """
+    """Sandwich norm wraps both sub-layers with pre- and post-norm (4 modules); plain pre-norm
+    normalizes only each sub-layer's input (2)."""
     base_kwargs = dict(n_embd=128, n_head=4, n_kv_head=2, n_layer=1, block_size=16, vocab_size=65)
 
     sandwich_block = Block(GPTConfig(norm_placement="sandwich", **base_kwargs), layer_idx=0)
@@ -55,11 +47,8 @@ def test_block_sandwich_norm_has_four_norms_pre_has_two():
 
 
 def test_full_model_b_recipe_end_to_end():
-    """
-    RoPE + GQA + GeGLU + sandwich norm combined -- the actual full "Model B" recipe,
-    exercised together for the first time. Just needs to construct, forward cleanly
-    under bf16 autocast with no warnings, and produce a real loss.
-    """
+    """RoPE + GQA + GeGLU + sandwich norm all at once: constructs, forwards warning-free under
+    bf16 autocast, and produces a real loss."""
     config = GPTConfig(
         position_encoding="rope", n_kv_head=2, mlp_type="geglu", norm_placement="sandwich",
         n_embd=128, n_head=4, n_layer=2, block_size=16, vocab_size=65,

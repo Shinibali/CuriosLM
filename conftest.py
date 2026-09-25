@@ -1,3 +1,2 @@
-# Empty on purpose. Its presence makes pytest add this directory (the project
-# root) to sys.path, so `from curioslm import ...` resolves in tests without
-# needing an editable pip install of this project.
+# Empty on purpose: its presence puts the project root on sys.path, so `from curioslm import ...`
+# resolves in tests without an editable install.

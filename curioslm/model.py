@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from .config import GPTConfig # architecture knobs live in config.py, with everything else
+from .config import GPTConfig
 
 
 def build_rope_cache(head_size, block_size, theta=10000):
@@ -18,9 +18,7 @@ def build_rope_cache(head_size, block_size, theta=10000):
 
     inv_freq = theta ** (-2.0 * torch.arange(head_size//2, dtype=torch.float32) / head_size) # (hs/2)
 
-    # Eq. 34 for cos and sin implementation for (block size m, head_size//2) angles
-    # R = x * cos (m*theta) +  x_mod * sin (m*theta)
-
+    # Eq. 34, R = x * cos(m*theta) + x_mod * sin(m*theta), over (block_size, head_size//2) angles
     m = torch.arange(block_size, dtype=torch.float32) # (T)
 
     m_theta = torch.outer(m, inv_freq) # (T, hs/2)
@@ -51,18 +49,17 @@ class RotaryEmbedding(nn.Module):
         B, nh, T, hs = q.size()
         assert T <= self.rope_cosines.size(0), "Seq len should be smaller than block size"
         
-        rope_cosines = self.rope_cosines[:T, :].to(dtype=q.dtype) # (T, hs), change dtype to that of q for optimal compile
+        rope_cosines = self.rope_cosines[:T, :].to(dtype=q.dtype) # (T, hs), match q's dtype for compile
         rope_sines = self.rope_sines[:T, :].to(dtype=q.dtype) # (T, hs)
 
-        # note this is different than the paper https://arxiv.org/pdf/2104.09864 interleaved style. 
-        # It is "GPT-NeoX style" for (x_i, x_{i+d/2}) instead of (x_{2i-1}, x_{2i}) dimension pair rotation. 
-        # Does not change the outcome, unless mixing weights with other interleaved/"GPT-J style" models from HF
+        # "GPT-NeoX style" pairing (x_i, x_{i+d/2}) rather than the paper's interleaved
+        # (x_{2i-1}, x_{2i}). Same outcome, unless mixing weights with interleaved HF models.
         q_rotated = q * rope_cosines + self._rotate_half(q) * rope_sines # B, nh, T, hs
         k_rotated = k * rope_cosines + self._rotate_half(k) * rope_sines # B, nh, T, hs
 
         return q_rotated, k_rotated
 
-# The nn.RMSNorm direct usage was throwing error with dtype mismatch, hence this wrapper to take care of dtypes
+# Wrapper: nn.RMSNorm used directly throws on dtype mismatch under autocast.
 class RMSNormFP32(nn.Module):
     def __init__(self, n_embd, eps=1e-5):
         super().__init__()
@@ -99,8 +96,8 @@ class CausalSelfAttention(nn.Module):
         self.enable_gqa = self.num_kv_heads != self.n_head
         self.kv_size = self.num_kv_heads * self.head_size
 
-        # for the c_attn out, Q stays as is for each head + 2 is for K and V weights
-        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * self.kv_size, bias = config.bias) 
+        # Q keeps full width; the +2 is K and V, which are narrower under GQA
+        self.c_attn = nn.Linear(config.n_embd, config.n_embd + 2 * self.kv_size, bias = config.bias)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias = config.bias)
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
@@ -230,12 +227,8 @@ class GPT(nn.Module):
         print(f"number of parameters: {self.get_num_params()/1e6:0.2f}M")
 
     def get_num_params(self, non_embedding=True):
-        """
-        Return the number of parameters in the model.
-        For non-embedding count (default), the position embeddings get subtracted.
-        The token embeddings would too, except due to the parameter sharing these
-        params are actually used as weights in the final layer, so we include them.
-        """
+        """Parameter count. The non-embedding default subtracts position embeddings but keeps
+        token embeddings, which weight tying reuses as the final layer."""
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding and hasattr(self.transformer, 'wpe'):
             n_params -= self.transformer.wpe.weight.numel()

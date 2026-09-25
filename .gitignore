@@ -8,6 +8,7 @@ out/
 out-*/
 *.pt
 *.ckpt
+*.npy
 
 # experiment logs
 wandb/
@@ -19,7 +20,7 @@ runs/
 .prepare_checkpoint.json
 **/data/**/input.txt
 
-# internal build-tracking docs — not portfolio content, see S1_REQUIREMENTS.md's own header
+# internal build-tracking docs — not portfolio content
 LEARNING_PLAN.md
 TRAINING_COST_GUIDE.md
 S1_REQUIREMENTS.md

@@ -1,9 +1,7 @@
 """
 Shared runtime setup: device selection, mixed precision, filesystem paths, and
-hardware peak-FLOPS numbers.
-
-train.py and sample.py both import from here so their device handling can't
-drift apart
+hardware peak-FLOPS numbers. train.py and sample.py both import from here so their
+device handling can't drift apart.
 """
 
 import os
@@ -11,9 +9,8 @@ from contextlib import nullcontext
 
 import torch
 
-# Absolute paths, so scripts work regardless of the shell's cwd.
-# This file lives in nanogpt/, so the project root is one level up — that's where
-# data/, config/ and out/ live.
+# Absolute paths, so scripts work regardless of the shell's cwd. The project root
+# (holding data/, config/, out/) is one level up from this package.
 PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(PACKAGE_ROOT)
 
@@ -30,8 +27,7 @@ def project_path(*parts):
 
 
 def package_path(*parts):
-    """Path relative to the nanogpt/ package — used to locate configurator.py,
-    which is exec'd by path rather than imported."""
+    """Path inside this package — used to locate configurator.py, which is exec'd by path."""
     return os.path.join(PACKAGE_ROOT, *parts)
 
 
@@ -49,11 +45,8 @@ def device_type_of(device):
 
 
 def pick_dtype(dev_type):
-    """
-    Prefer bfloat16 anywhere it works. It carries float32's exponent range, so
-    it needs no GradScaler and can't silently underflow the way float16 does.
-    float16 is only the right answer on CUDA cards too old for bf16 (pre-Ampere).
-    """
+    """Prefer bfloat16: float32's exponent range means no GradScaler and no silent
+    underflow. float16 is only right on CUDA cards too old for bf16 (pre-Ampere)."""
     if dev_type == 'cuda':
         return 'bfloat16' if torch.cuda.is_bf16_supported() else 'float16'
     if dev_type == 'mps':
@@ -68,8 +61,7 @@ def autocast_ctx(dev_type, dtype):
 
 
 def grad_scaler(dev_type, dtype):
-    """Loss scaling exists to stop float16 gradients underflowing. bf16 and
-    fp32 have the range to go without, so the scaler is a no-op there."""
+    """Loss scaling stops float16 gradients underflowing; a no-op for bf16/fp32."""
     return torch.amp.GradScaler(dev_type, enabled=(dtype == 'float16'))
 
 
@@ -80,9 +72,8 @@ def enable_tf32():
         torch.backends.cudnn.allow_tf32 = True
 
 
-# Dense (non-sparsity-inflated) tensor-core throughput at bf16/fp16, in FLOP/s.
-# Vendors usually headline the 2x "with sparsity" number; these are the honest
-# ones, because MFU computed against an inflated peak understates the model.
+# Dense (non-sparsity-inflated) tensor-core throughput at bf16/fp16, in FLOP/s. Vendors
+# headline the 2x "with sparsity" number; an inflated peak understates MFU.
 _CUDA_PEAK_FLOPS = {
     'H200': 989e12,
     'H100': 989e12,       # SXM. PCIe is ~756e12 — override if that's the card.
@@ -97,14 +88,9 @@ _CUDA_PEAK_FLOPS = {
 
 
 def peak_flops(dev_type, override=0.0):
-    """
-    Denominator for MFU. Returns None when unknown, and callers should then
-    report MFU as n/a rather than print a number computed against a guess.
-
-    Deliberately returns None for MPS: Apple's GPUs have no comparable published
-    dense tensor-core figure, so any MFU printed there would be measuring against
-    a made-up peak. Pass `override` if you have a number you trust.
-    """
+    """Denominator for MFU; None when unknown, so callers report n/a instead of a number
+    computed against a guess. None on MPS: Apple publishes no comparable dense figure.
+    Pass `override` if you have one you trust."""
     if override and override > 0:
         return override
     if dev_type != 'cuda':

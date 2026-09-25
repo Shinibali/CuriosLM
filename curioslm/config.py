@@ -8,9 +8,9 @@ Every tunable in the project, declared exactly once.
     RuntimeConfig  device, precision, compile, seed
     SampleConfig   generation settings (sample.py only)
 
-Scripts flatten the groups they need into module globals with `flatten()`, which keeps
-nanoGPT's `configurator.py` override mechanism working unchanged — it overrides plain
-globals, so the dataclasses are only a declaration layer, not a runtime object graph.
+Scripts flatten the groups they need into module globals with `flatten()`, keeping
+`configurator.py`'s override mechanism working unchanged — it overrides plain globals, so
+these dataclasses are a declaration layer, not a runtime object graph.
 """
 
 from dataclasses import dataclass, asdict, fields
@@ -18,19 +18,17 @@ from typing import Literal
 
 @dataclass
 class GPTConfig:
-    """Model architecture. Consumed directly by model.GPT, and the single source of
-    truth for `checkpoints.CONFIG_KEYS` — add a knob here and it propagates to the
-    checkpoint format, the resume path and the sweep runner automatically."""
+    """Model architecture. Consumed by model.GPT and the source of `checkpoints.CONFIG_KEYS` —
+    a knob added here propagates to the checkpoint format and resume path automatically."""
     block_size: int = 1024
     vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 4#12
     n_head: int = 4#12
     n_embd: int = 124#768
     dropout: float = 0.0 # 0 is good for pretraining, try 0.1+ for finetuning
-    bias: bool = True # bias in Linears and LayerNorm — True matches Karpathy's actual GPT-2 default,
-                       # kept for Model A's apples-to-apples fidelity to vanilla nanoGPT
+    bias: bool = True # bias in Linears and LayerNorm; True matches nanoGPT's GPT-2 default
 
-    position_encoding: Literal["absolute", "rope"] = "absolute" # Either absolute or RoPE positional encodings turns on
+    position_encoding: Literal["absolute", "rope"] = "absolute"
     rope_theta: float = 10000 # from paper Eq 15: https://arxiv.org/pdf/2104.09864
 
     n_kv_head: int | None = None # None = regular MHA (n_kv_head == n_head)
@@ -44,9 +42,7 @@ class GPTConfig:
     def is_global_layer(self, layer_idx: int) -> bool:
         return self.attention_window is None or (layer_idx % self.local_global_ratio == 0)
 
-    # Single source of truth for the position_encoding decision — every other module reads
-    # these instead of comparing against the raw string itself, so the comparison only ever
-    # lives in one place.
+    # Other modules read these rather than comparing the raw strings themselves.
     @property
     def use_rope(self) -> bool:
         return self.position_encoding == "rope"
@@ -70,13 +66,10 @@ class GPTConfig:
 
 @dataclass
 class DataConfig:
-    dataset: str = 'fineweb_edu' # directory under data/ -- also the single source of truth
-                                  # for which dataset name hf_shards.py uploads/downloads
-    hf_repo_id: str = 'CuriosLM/fineweb-edu-shards' # private staging repo shards move through
-                                                     # between prepare.py (local) and training
-                                                     # (RunPod nodes) -- see prepare.py's docstring
-    shard_size: int = 100_000_000 # tokens/shard -- NOT independent of world_size*batch_size*
-                                   # block_size (OptimConfig/RuntimeConfig)
+    dataset: str = 'fineweb_edu' # directory under data/; also what hf_shards.py uploads/downloads
+    hf_dataset_repo_id: str = 'CuriosLM/fineweb_edu-shards' # private repo staging shards between
+                                                            # prepare.py (local) and GPU training
+    shard_size: int = 100_000_000 # tokens/shard -- NOT independent of world_size*batch_size*block_size
 
 
 @dataclass
@@ -91,6 +84,10 @@ class IOConfig:
     wandb_log: bool = False
     wandb_project: str = 'owt'
     wandb_run_name: str = 'gpt2'
+    hf_checkpoint_repo_id: str = 'CuriosLM/checkpoints-staging' # private repo each run's ckpt.pt is
+                                                                # auto-uploaded to, under out_dir --
+                                                                # ephemeral pod disk is never the
+                                                                # only copy
 
 
 @dataclass
@@ -134,10 +131,7 @@ class SampleConfig:
 
 def flatten(*configs):
     """Merge config groups into one dict of plain values, for `globals().update(...)`.
-
-    Raises on a duplicate key across groups — that assert is the thing stopping a
-    setting from quietly being declared in two places again.
-    """
+    Raises on a duplicate key across groups: each setting gets exactly one home."""
     merged = {}
     for cfg in configs:
         for key, value in asdict(cfg).items():

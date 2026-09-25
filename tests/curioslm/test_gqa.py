@@ -6,13 +6,8 @@ from curioslm.model import CausalSelfAttention
 
 
 def test_enable_gqa_matches_manual_head_broadcast():
-    """
-    Verifies the actual assumption the implementation relies on: that PyTorch's
-    `enable_gqa=True` groups heads the way we expect (each block of
-    n_head // n_kv_head consecutive query heads sharing one kv head), not some
-    other order. Checked by comparing against a hand-built repeat_interleave
-    broadcast, which makes that grouping explicit rather than trusting it.
-    """
+    """PyTorch's enable_gqa=True groups consecutive query heads per kv head, not some other
+    order -- pinned against an explicit repeat_interleave broadcast rather than trusted."""
     torch.manual_seed(0)
     B, n_head, n_kv_head, T, hs = 2, 4, 2, 6, 8
     q = torch.randn(B, n_head, T, hs)
@@ -32,11 +27,7 @@ def test_enable_gqa_matches_manual_head_broadcast():
 
 
 def test_causal_self_attention_gqa_shapes():
-    """
-    Integration-level check on the actual module: with n_kv_head < n_head, confirm
-    c_attn projects to the reduced size (not the full 3*n_embd a plain MHA would use)
-    and that a forward pass produces the correct (B, T, n_embd) output shape.
-    """
+    """n_kv_head < n_head: c_attn projects to the reduced size, not a plain MHA's 3*n_embd."""
     n_head, n_kv_head, n_embd, head_size = 4, 2, 32, 8
     config = GPTConfig(
         n_head=n_head, n_kv_head=n_kv_head, n_embd=n_embd,
@@ -56,10 +47,7 @@ def test_causal_self_attention_gqa_shapes():
 
 
 def test_causal_self_attention_mha_equivalent_when_kv_heads_match():
-    """
-    n_kv_head == n_head (via n_kv_head=None resolving to n_head) should behave like
-    plain MHA: c_attn projects to the full 3*n_embd, and enable_gqa is off.
-    """
+    """n_kv_head=None resolves to n_head, giving plain MHA: full 3*n_embd, enable_gqa off."""
     n_head, n_embd = 4, 32
     config = GPTConfig(n_head=n_head, n_kv_head=None, n_embd=n_embd, n_layer=1, block_size=16, vocab_size=65)
     attn = CausalSelfAttention(config, layer_idx=0)

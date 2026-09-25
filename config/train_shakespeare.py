@@ -22,7 +22,7 @@ block_size = 256 # context of up to 256 previous BPE tokens
 n_layer = 8
 attention_window = 4
 n_head = 4
-n_kv_head = n_head // 4 # 4:1 Q to KV heads # needs declaration here since GPTconfig class has default None, so cli argument fails
+n_kv_head = n_head // 4 # 4:1 Q:KV; set here because GPTConfig defaults it to None, which a CLI override can't retype
 n_embd = n_head * 32 # 128
 dropout = 0.2
 

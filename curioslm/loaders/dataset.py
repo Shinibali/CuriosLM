@@ -1,7 +1,6 @@
 """
-Dataset access: the data/<name>/ layout, tokenizer, and batch sampling.
-
-All datasets are GPT-2 BPE-encoded (tiktoken) 
+Dataset access: the data/<name>/ layout, tokenizer, and batch sampling. All datasets are
+GPT-2 BPE-encoded (tiktoken).
 """
 
 import os
@@ -25,16 +24,12 @@ def encoder_decoder():
 
 
 def make_get_batch(name, block_size, batch_size, device, device_type):
-    """Build a get_batch(split) sampler.
-
-    Takes its settings as arguments rather than reading module globals the way the
-    original closure did, so a sweep can hold several samplers — different block
-    sizes, different datasets — alive in one process.
-    """
+    """Build a get_batch(split) sampler. Settings are arguments rather than module globals, so
+    one process can hold several samplers (different block sizes or datasets) at once."""
     directory = data_dir(name)
 
     def get_batch(split):
-        # Reopen the memmap every call rather than holding one open: see
+        # Reopen the memmap every call rather than holding one open, to avoid a leak:
         # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
         data = np.memmap(os.path.join(directory, f'{split}.bin'), dtype=np.uint16, mode='r')
         ix = torch.randint(len(data) - block_size, (batch_size,))

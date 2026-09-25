@@ -4,16 +4,10 @@ from curioslm.model import RotaryEmbedding
 
 
 def test_rope_relative_position_invariance():
-    """
-    The defining property of RoPE: the (pre-softmax) dot product between a rotated
-    query and a rotated key should depend only on their relative position (m - n),
-    not on their absolute positions. This test checks two things:
+    """q·k after rotation depends only on relative position (m - n), not absolute position.
 
-    1. Two (q_pos, k_pos) pairs with the *same* relative distance must give the
-       same dot product, even though their absolute positions differ.
-    2. A *different* relative distance must give a *different* dot product --
-       otherwise a broken no-op rotation would trivially pass check 1 too, since
-       an unrotated q/k pair's dot product never depends on position at all.
+    The second half (different distance -> different dot product) is what rules out a no-op
+    rotation, which would pass the first half trivially.
     """
     torch.manual_seed(0)
     head_size = 8
@@ -33,14 +27,14 @@ def test_rope_relative_position_invariance():
         q_rot, k_rot = rope(q, k)
         return torch.sum(q_rot[:, :, q_pos, :] * k_rot[:, :, k_pos, :])
 
-    # same relative distance (5), different absolute positions -> dot products must match
+    # same distance (5), different absolute positions -> must match
     dot_a = rotated_dot(q_pos=10, k_pos=5)
     dot_b = rotated_dot(q_pos=30, k_pos=25)
     assert torch.allclose(dot_a, dot_b, atol=1e-5), (
         f"expected equal dot products for equal relative distance, got {dot_a} vs {dot_b}"
     )
 
-    # different relative distance -> dot product should differ
+    # different distance -> must differ
     dot_c = rotated_dot(q_pos=10, k_pos=2)
     assert not torch.allclose(dot_a, dot_c, atol=1e-5), (
         "dot product did not change with relative distance -- rotation may be a no-op"

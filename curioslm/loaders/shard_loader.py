@@ -1,10 +1,10 @@
 """
-DDP-aware sequential shard-cycling data loader, for the large-scale FineWeb-Edu runs.
+DDP-aware sequential shard-cycling data loader for the large multi-shard runs, following
+Karpathy's build-nanogpt DataLoaderLite.
 
-Distinct from dataset.py's make_get_batch, which is random-sampling and stateless per call
-(fine for the small single-file Shakespeare smoke tests). This loader is fundamentally
-different: SEQUENTIAL and STATEFUL. Every rank marches forward through the *same* shard
-sequence in lockstep with every other rank -- rank r always reads a distinct, non-overlapping window of tokens within whatever shard is currently "active" for the whole cluster, and every rank advances together. This is Karpathy's build-nanogpt DataLoaderLite pattern.
+Unlike dataset.py's make_get_batch (random-sampling, stateless per call), this is sequential
+and stateful: every rank marches through the *same* shard sequence in lockstep, each reading
+a distinct non-overlapping window of the currently active shard.
 """
 import os
 
@@ -15,19 +15,17 @@ from .dataset import data_dir
 
 
 class ShardedDataLoader:
-    """
-    Sequential, rank-partitioned loader over a split's tokenized .npy shards.
+    """Sequential, rank-partitioned loader over a split's tokenized .npy shards. rank/world_size
+    are cluster-global, not per-node -- e.g. ranks 0-7 on node A, 8-15 on node B, world_size=16."""
 
-    rank/world_size identify THIS process among all GPUs across the whole cluster (not just
-    within one node) -- e.g. rank 0-7 on node A, rank 8-15 on node B, world_size=16.
-    """
-
-    def __init__(self, dataset_name, split, block_size, batch_size, rank, world_size):
+    def __init__(self, dataset_name, split, block_size, batch_size, rank, world_size, device, device_type):
         assert split in {"train", "val"}
         self.block_size = block_size
         self.batch_size = batch_size
         self.rank = rank
         self.world_size = world_size
+        self.device = device
+        self.device_type = device_type
 
         dataset_dir = data_dir(dataset_name)
         self.shards = sorted([os.path.join(dataset_dir, filename) for filename in os.listdir(dataset_dir) if split in filename])
@@ -37,9 +35,8 @@ class ShardedDataLoader:
         self.reset()
 
     def reset(self):
-        """(Re)start this loader at the beginning of the shard sequence, at this rank's
-        starting offset. Called once from __init__; you may also want it callable again
-        later (e.g. to start a fresh epoch on purpose), so keep it self-contained."""
+        """(Re)start at the beginning of the shard sequence, at this rank's offset. Called from
+        __init__, and callable again to start a fresh epoch on purpose."""
         self.current_shard_index = 0  
         self.tokens = self._load_shard(self.current_shard_index)               
         self.current_position = self.rank * self.batch_size * self.block_size  # R * B * T      
@@ -51,10 +48,7 @@ class ShardedDataLoader:
 
 
     def next_batch(self):
-        """
-        Return this rank's next (x, y) batch as torch tensors, each shape
-        (batch_size, block_size) -- y is x shifted by one position.
-        """
+        """This rank's next (x, y) batch, each (batch_size, block_size); y is x shifted by one."""
 
         B_times_T = self.batch_size * self.block_size
 
@@ -64,11 +58,18 @@ class ShardedDataLoader:
 
         self.current_position += self.world_size * B_times_T
 
-        # look-ahead check: is there still a full batch_size*block_size+1 window left in the
-        # current shard for the *next* call? if not, move on before we run out mid-batch.
+        # Look ahead: if the *next* call wouldn't have a full window left, advance now rather
+        # than running out mid-batch.
         if self.current_position + B_times_T * self.world_size + 1 > len(self.tokens):
             self.current_shard_index = (self.current_shard_index + 1) % len(self.shards)  # wrap to shard 0 after the last one
             self.tokens = self._load_shard(self.current_shard_index)
             self.current_position = self.rank * B_times_T  # same starting-offset formula as reset()
+
+        if self.device_type == 'cuda':
+            # pinned memory can be copied to the GPU asynchronously
+            x = x.pin_memory().to(self.device, non_blocking=True)
+            y = y.pin_memory().to(self.device, non_blocking=True)
+        else:
+            x, y = x.to(self.device), y.to(self.device)
 
         return x,y
