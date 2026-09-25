@@ -255,13 +255,17 @@ while True:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
-            wandb.log({
+            metrics = {
                 "iter": iter_num,
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
                 "lr": lr,
                 "mfu": running_mfu*100, # convert to percentage
-            })
+            }
+            peak_mem = runtime.peak_memory_gb(device_type)
+            if peak_mem is not None:
+                metrics["peak_mem_gb"] = peak_mem
+            wandb.log(metrics)
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val'].item()
             if iter_num > 0:
@@ -311,7 +315,9 @@ while True:
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt, flops_promised)
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
         mfu_str = f"{running_mfu*100:.2f}%" if running_mfu >= 0 else "n/a"
-        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {mfu_str}")
+        peak_mem = runtime.peak_memory_gb(device_type)
+        mem_str = f"{peak_mem:.2f}GB" if peak_mem is not None else "n/a"
+        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {mfu_str}, peak mem {mem_str}")
     iter_num += 1
     local_iter_num += 1
 

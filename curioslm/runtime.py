@@ -102,6 +102,14 @@ def peak_flops(dev_type, override=0.0):
     return None
 
 
+def peak_memory_gb(dev_type):
+    """Peak memory PyTorch allocated on this process's GPU since startup, in GB; None off CUDA
+    (MPS exposes current usage but no peak)."""
+    if dev_type != 'cuda':
+        return None
+    return torch.cuda.max_memory_allocated() / 1e9
+
+
 def describe(device, dtype, compile_enabled):
     """One line saying what we actually ended up running on."""
     bits = [f"device={device}", f"dtype={dtype}", f"compile={compile_enabled}"]
