@@ -305,7 +305,7 @@ while True:
                 )
                 # get it off this pod's ephemeral disk immediately; async so a multi-GB
                 # upload never blocks the training loop
-                checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id)
+                checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id, final=final_iter)
     if iter_num == 0 and eval_only:
         break
     if final_iter: # every rank stops here, after exactly max_iters training steps

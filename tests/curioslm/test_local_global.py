@@ -75,3 +75,34 @@ def test_local_global_model_forward_and_backward():
     x_short = torch.randint(0, 65, (1, 3))
     logits_short, _ = model(x_short)
     assert logits_short.shape == (1, 1, 65)
+
+
+def test_flex_block_mask_gives_the_same_attention_as_the_dense_mask():
+    """The GPU path (FlexAttention + block mask) and the Mac path (SDPA + dense mask) are built from the
+    same local_causal rule and must agree. FlexAttention can't run backward off CUDA, so this checks the
+    forward pass only, with gradients off."""
+    from torch.nn.attention.flex_attention import flex_attention
+    import torch.nn.functional as F
+
+    config = GPTConfig(n_embd=64, n_head=4, n_kv_head=1, n_layer=2, block_size=64, vocab_size=65,
+                       position_encoding="rope", attention_window=16, local_global_ratio=2)
+    attn = GPT(config).transformer.h[1].attn
+    assert not attn.is_global_layer
+
+    T = 48  # shorter than block_size, as in generation
+    with torch.no_grad():
+        q, k, v = torch.randn(2, 4, T, 16), torch.randn(2, 1, T, 16), torch.randn(2, 1, T, 16)
+        flex = flex_attention(q, k, v, block_mask=attn._flex_block_mask(T, "cpu"), enable_gqa=True)
+        dense = F.scaled_dot_product_attention(q, k, v, attn_mask=attn.window_mask[:T, :T], enable_gqa=True)
+
+    assert torch.allclose(flex, dense, atol=1e-5)
+
+
+def test_flex_block_mask_is_built_once_per_length():
+    """The mask depends only on positions, so it's cached per (T, device) rather than rebuilt every step."""
+    config = GPTConfig(n_embd=32, n_head=4, n_layer=2, block_size=32, vocab_size=65,
+                       attention_window=8, local_global_ratio=2)
+    attn = GPT(config).transformer.h[1].attn
+
+    assert attn._flex_block_mask(32, "cpu") is attn._flex_block_mask(32, "cpu")
+    assert attn._flex_block_mask(16, "cpu") is not attn._flex_block_mask(32, "cpu")

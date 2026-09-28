@@ -9,7 +9,7 @@ from dataclasses import fields
 from datetime import datetime, timedelta, timezone
 
 import torch
-from huggingface_hub import HfApi, hf_hub_download
+from huggingface_hub import CommitOperationCopy, HfApi, hf_hub_download
 from huggingface_hub.utils import disable_progress_bars
 
 from .config import GPTConfig
@@ -20,6 +20,7 @@ from .model import GPT
 disable_progress_bars()
 
 CHECKPOINT_FILENAME = 'ckpt.pt'
+FINALS_DIR = 'finals' # timestamped frozen copies of finished runs' checkpoints; training never overwrites them
 
 # Saves land every few minutes, so this keeps at most a handful of recent versions per run while
 # still far exceeding the seconds between an LFS upload and its commit.
@@ -81,9 +82,10 @@ def check_no_overwrite(path, wandb_run_name):
         )
 
 
-def upload_checkpoint(out_dir, repo_id):
+def upload_checkpoint(out_dir, repo_id, final=False):
     """Push out_dir/ckpt.pt to the staging repo at a path mirroring out_dir, so the repo's file
-    listing itself says which run each checkpoint belongs to. Creates the repo on first use."""
+    listing itself says which run each checkpoint belongs to. Creates the repo on first use.
+    `final` also freezes a copy (see freeze_final)."""
     api = HfApi()
     api.create_repo(repo_id, repo_type="model", private=True, exist_ok=True)
     path_in_repo = f"{out_dir}/{CHECKPOINT_FILENAME}"
@@ -94,7 +96,24 @@ def upload_checkpoint(out_dir, repo_id):
         repo_type="model",
     )
     print(f"uploaded checkpoint to {repo_id}:{path_in_repo}")
+    if final:
+        freeze_final(out_dir, repo_id)
     prune_old_versions(repo_id)
+
+
+def freeze_final(out_dir, repo_id):
+    """Copy a finished run's checkpoint to finals/<out_dir>/ckpt-<UTC time>.pt, which training never
+    writes. A later run reusing this out_dir (e.g. a forgotten LADDER_SEED) can then replace only the
+    working copy -- even a rerun that finishes freezes under a new name -- and pruning keeps every frozen
+    final because it's still referenced. The copy is server-side: no upload, no extra storage."""
+    src = f"{out_dir}/{CHECKPOINT_FILENAME}"
+    dst = f"{FINALS_DIR}/{out_dir}/ckpt-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.pt"
+    try:
+        HfApi().create_commit(repo_id, repo_type="model", operations=[CommitOperationCopy(src, dst)],
+                              commit_message=f"Freeze final checkpoint of {out_dir}")
+        print(f"froze final checkpoint at {repo_id}:{dst}")
+    except Exception as e:
+        print(f"freezing the final checkpoint FAILED (upload itself succeeded): {e!r}", flush=True)
 
 
 def prune_old_versions(repo_id):
@@ -121,11 +140,11 @@ def stale_orphans(lfs_files, current_oids, older_than):
     return [f for f in lfs_files if f.file_oid not in current_oids and f.pushed_at < older_than]
 
 
-def upload_checkpoint_async(out_dir, repo_id):
+def upload_checkpoint_async(out_dir, repo_id, final=False):
     """Non-blocking upload_checkpoint: returns a Future immediately so the training loop never
     stalls on the transfer. concurrent.futures' atexit hook joins the pool, so a run's final
     upload still finishes even though nothing here waits on it."""
-    future = _upload_pool.submit(upload_checkpoint, out_dir, repo_id)
+    future = _upload_pool.submit(upload_checkpoint, out_dir, repo_id, final)
     future.add_done_callback(_report_upload_failure)
     return future
 

@@ -3,6 +3,7 @@
 #
 #   LADDER_RUNG=a2 uv run python train.py config/ladder_gpu.py --device=cuda
 #   LADDER_RUNG=a2 LADDER_DATASET=cosmopedia_v2 uv run python train.py config/ladder_gpu.py --device=cuda
+#   LADDER_RUNG=a3 LADDER_SEED=1338 ...   # a second seed of a rung (the default seed is 1337)
 #
 # A data-mixture study doesn't belong here: it varies a mixture ratio rather than an architecture
 # rung, and the loader reads only one dataset at a time today.
@@ -48,8 +49,14 @@ RUNGS = {
 }
 
 rung = os.environ['LADDER_RUNG']  # KeyError if forgotten, rather than a silent default
+# A rerun with another seed needs its own out_dir and wandb run. Set it here, not with --seed=:
+# this file builds the names before command-line overrides land.
+seed_suffix = ''
+if 'LADDER_SEED' in os.environ:
+    seed = int(os.environ['LADDER_SEED'])
+    seed_suffix = f'-s{seed}'
 # dataset is always in the name: the same rung on two datasets must never share an out_dir,
 # or one silently overwrites the other's checkpoint
-out_dir = f'out-ladder-{dataset}-{rung}'
-wandb_run_name = f'ladder-{dataset}-{rung}'
+out_dir = f'out-ladder-{dataset}-{rung}{seed_suffix}'
+wandb_run_name = f'ladder-{dataset}-{rung}{seed_suffix}'
 globals().update(RUNGS[rung])  # e.g. KeyError: 'a9' if mistyped

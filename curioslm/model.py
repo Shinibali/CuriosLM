@@ -8,6 +8,7 @@ import inspect
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 
 from .config import GPTConfig
 
@@ -68,6 +69,12 @@ class RMSNormFP32(nn.Module):
     def forward(self, x):
         return self.norm(x.float()).type_as(x)
 
+def local_causal(q_idx, kv_idx, window):
+    # think of k_idx falling in this range: q_idx - window < k_idx <= q_idx
+    causal = kv_idx <= q_idx
+    windowed = q_idx - window < kv_idx # at most window-1 positions back
+    return causal & windowed
+
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config, layer_idx):
@@ -82,9 +89,9 @@ class CausalSelfAttention(nn.Module):
             idx = torch.arange(config.block_size)
             # idx.unsqueeze(1) reshapes idx from (block_size,) to (block_size, 1) -- q
             # idx.unsqueeze(0) reshapes to (1, block_size) -- k. Comparing them triggers broadcasting:
-            causal = idx.unsqueeze(1) >= idx.unsqueeze(0)  # (block_size, block_size): kv_idx <= q_idx
-            windowed = (idx.unsqueeze(1) - idx.unsqueeze(0)) < config.attention_window  # q_idx - window < kv_idx
-            self.register_buffer("window_mask", causal & windowed, persistent=False)
+            self.attention_window = config.attention_window
+            self.register_buffer("window_mask", local_causal(idx.unsqueeze(1), idx.unsqueeze(0), config.attention_window), persistent=False)
+            self._block_masks = {}
 
         self.n_head = config.n_head
         self.n_embd = config.n_embd
@@ -102,7 +109,18 @@ class CausalSelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
 
-        self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta) if config.use_rope else None
+        self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta) if config.use_rope else None 
+        
+    def _flex_block_mask(self, T, device):
+        key = (T, str(device))
+        if key not in self._block_masks:
+            window = self.attention_window
+            # FlexAttention calls this per (q_idx, kv_idx) position pair to find whole blocks it can skip. 
+            # Batch (b) and head (h) don't matter for a sliding window.
+            self._block_masks[key] = create_block_mask(
+                lambda b, h, q_idx, kv_idx: local_causal(q_idx, kv_idx, window),
+                None, None, T, T, device=device)
+        return self._block_masks[key]
 
     def forward(self, x):
 
@@ -117,11 +135,16 @@ class CausalSelfAttention(nn.Module):
         if self.rope is not None:
             q, k = self.rope(q,k) # rotated q, k for every (x_i, x_{i+d/2}) dimension pair
 
+        use_flex_attn = q.is_cuda and torch.compiler.is_compiling() and not (self.training and self.dropout > 0)
+
         if self.is_global_layer:
             y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
         else:
-            window_mask = self.window_mask[:T, :T] # (T, T), sliced down from the block_size buffer
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=window_mask, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
+            if use_flex_attn:
+                y = flex_attention(q,k,v, block_mask=self._flex_block_mask(T, q.device), enable_gqa=self.enable_gqa)
+            else:
+                window_mask = self.window_mask[:T, :T] # (T, T), sliced down from the block_size buffer
+                y = F.scaled_dot_product_attention(q, k, v, attn_mask=window_mask, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
 
         y = y.transpose(1, 2).contiguous().view(B,T,C)
 
