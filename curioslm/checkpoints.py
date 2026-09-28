@@ -6,6 +6,7 @@ Face Hub repo so an ephemeral GPU node's local disk is never the only copy.
 import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import fields
+from datetime import datetime, timedelta, timezone
 
 import torch
 from huggingface_hub import HfApi, hf_hub_download
@@ -19,6 +20,10 @@ from .model import GPT
 disable_progress_bars()
 
 CHECKPOINT_FILENAME = 'ckpt.pt'
+
+# Saves land every few minutes, so this keeps at most a handful of recent versions per run while
+# still far exceeding the seconds between an LFS upload and its commit.
+PRUNE_MIN_AGE = timedelta(minutes=10)
 
 # max_workers=1 serializes uploads: a save arriving before the previous upload finishes queues
 # behind it rather than racing it for the same (repeatedly overwritten) remote path.
@@ -89,6 +94,31 @@ def upload_checkpoint(out_dir, repo_id):
         repo_type="model",
     )
     print(f"uploaded checkpoint to {repo_id}:{path_in_repo}")
+    prune_old_versions(repo_id)
+
+
+def prune_old_versions(repo_id):
+    """Overwriting ckpt.pt keeps every old version, both in git history and as a stored LFS object,
+    and all of it counts against the private-storage quota.
+    Squash history to one commit, then permanently delete LFS objects no current file references.
+    Separate from the upload so a failed prune is never reported as a failed upload."""
+    try:
+        api = HfApi()
+        api.super_squash_history(repo_id=repo_id, repo_type="model")
+        current = {s.lfs.sha256 for s in api.repo_info(repo_id, repo_type="model", files_metadata=True).siblings if s.lfs}
+        stale = stale_orphans(api.list_lfs_files(repo_id, repo_type="model"), current,
+                              older_than=datetime.now(timezone.utc) - PRUNE_MIN_AGE)
+        if stale:
+            api.permanently_delete_lfs_files(repo_id, stale, repo_type="model")
+            print(f"pruned {len(stale)} old checkpoint version(s) from {repo_id}")
+    except Exception as e:
+        print(f"checkpoint prune failed (upload itself succeeded): {e!r}", flush=True)
+
+
+def stale_orphans(lfs_files, current_oids, older_than):
+    """LFS objects no current file points to, pushed before `older_than`. The age cut-off spares
+    another run's upload that is stored but not yet committed -- a window of seconds."""
+    return [f for f in lfs_files if f.file_oid not in current_oids and f.pushed_at < older_than]
 
 
 def upload_checkpoint_async(out_dir, repo_id):

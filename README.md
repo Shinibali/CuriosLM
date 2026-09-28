@@ -101,7 +101,9 @@ Fully automatic — no command to run. Rented GPU pods have ephemeral disk, so `
 (`IOConfig.hf_checkpoint_repo_id`) after every local save, on a background thread so training
 never blocks on the transfer. The remote path mirrors `out_dir` (e.g.
 `out-ladder-fineweb_edu-a2/ckpt.pt`), so the repo listing itself says which run each checkpoint
-came from. `init_from='resume'` pulls from there when the checkpoint isn't on the local disk;
+came from. Each upload then prunes the repo — squashes its history and permanently deletes replaced versions older
+than 10 minutes — since an overwritten file otherwise keeps every old version and counts it against the
+private-storage quota; the repo holds roughly one checkpoint per run. `init_from='resume'` pulls from there when the checkpoint isn't on the local disk;
 `init_from='scratch'` refuses to start if `out_dir` already holds a *different* run's checkpoint
 (compared by `wandb_run_name`), so an `out_dir` collision fails loudly rather than silently
 overwriting. Separate from the polished, public model repos, which get pushed by hand with a

@@ -42,6 +42,18 @@ main() {
     uv run --locked python -m curioslm.loaders.hf_shards download
     echo "shards: $(ls data/fineweb_edu/*.npy | wc -l) files"
 
+    # Uploads start failing at the private-storage cap (hit at ~99 GB on 2026-09-28): see it before a run.
+    uv run --locked python -c "
+from huggingface_hub import HfApi
+from curioslm.config import IOConfig
+org = IOConfig().hf_checkpoint_repo_id.split('/')[0]
+api, used = HfApi(), 0
+for lister, getter in ((api.list_models, api.model_info), (api.list_datasets, api.dataset_info)):
+    for repo in lister(author=org):
+        used += getter(repo.id, expand=['usedStorage']).used_storage or 0
+print(f'{org} private storage in use: {used / 1e9:.1f} GB')
+"
+
     echo "ready at commit $(git log --oneline -1)"
 }
 main "$@"

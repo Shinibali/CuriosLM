@@ -190,6 +190,13 @@ elif init_from == 'resume':
     best_val_loss = checkpoint['best_val_loss']
     if train_loader is not None and checkpoint.get('train_loader_state') is not None:
         train_loader.load_state_dict(checkpoint['train_loader_state'])
+    # get_lr reads the *current* schedule settings, so resuming with different ones jumps the LR.
+    # A warning, not an error: extending a run on purpose is legitimate.
+    schedule_keys = ('learning_rate', 'min_lr', 'warmup_iters', 'lr_decay_iters', 'decay_lr')
+    changed = {k: (checkpoint['config'][k], globals()[k]) for k in schedule_keys
+               if k in checkpoint['config'] and checkpoint['config'][k] != globals()[k]}
+    if changed and master_process:
+        print(f"WARNING: LR schedule differs from the checkpoint's (saved, now): {changed} -- the learning rate will jump")
 
 elif init_from.startswith('gpt2'):
     print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
@@ -206,6 +213,7 @@ elif init_from.startswith('gpt2'):
 
 model.to(device)
 n_params = model.get_num_params() # read before compile/DDP wrap the model
+n_params_total = model.get_num_params(non_embedding=False) # n_params omits wpe, hiding RoPE's saving
 
 scaler = runtime.grad_scaler(device_type, dtype)
 
@@ -245,7 +253,8 @@ def estimate_loss():
 # logging
 if wandb_log and master_process:
     import wandb
-    wandb.init(project=wandb_project, name=wandb_run_name, config={**config, 'n_params': n_params},
+    wandb.init(project=wandb_project, name=wandb_run_name,
+               config={**config, 'n_params': n_params, 'n_params_total': n_params_total},
                id=wandb_run_id, resume='allow' if wandb_run_id else None)
     # tokens seen is the x-axis: the unit training curves are compared in across runs and papers
     wandb.define_metric("tokens")
@@ -271,8 +280,10 @@ while True:
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-    # evaluate the loss on train/val sets and write checkpoints
-    if iter_num % eval_interval == 0 and master_process:
+    # evaluate the loss on train/val sets and write checkpoints -- always once more at max_iters, so the
+    # final checkpoint and final val loss are the fully trained model, not the last eval_interval multiple
+    final_iter = iter_num == max_iters
+    if (iter_num % eval_interval == 0 or final_iter) and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
@@ -282,7 +293,7 @@ while True:
                 "train/loss": losses['train'], # mean over eval_iters batches: the precise numbers
                 "val/loss": losses['val'],
             })
-        if losses['val'] < best_val_loss or always_save_checkpoint:
+        if losses['val'] < best_val_loss or always_save_checkpoint or final_iter:
             best_val_loss = losses['val'].item()
             if iter_num > 0:
                 print(f"saving checkpoint to {out_dir}")
@@ -296,6 +307,8 @@ while True:
                 # upload never blocks the training loop
                 checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id)
     if iter_num == 0 and eval_only:
+        break
+    if final_iter: # every rank stops here, after exactly max_iters training steps
         break
 
     # forward backward update, with optional gradient accumulation to simulate larger batch size
@@ -330,7 +343,9 @@ while True:
     if iter_num % log_interval == 0 and master_process:
         # CPU-GPU sync point; undo the grad-accum division to approximate the total loss
         lossf = loss.item() * gradient_accumulation_steps
-        if local_iter_num >= 5 and flops_promised: # let the training loop settle a bit
+        # skip warm-up, and eval iterations: their dt includes the eval and checkpoint save, and one
+        # such outlier in the running average showed up as a sawtooth in the MFU chart
+        if local_iter_num >= 5 and flops_promised and iter_num % eval_interval != 0:
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt, flops_promised)
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
         mfu_str = f"{running_mfu*100:.2f}%" if running_mfu >= 0 else "n/a"
@@ -357,10 +372,6 @@ while True:
             wandb.log(step_metrics)
     iter_num += 1
     local_iter_num += 1
-
-    # termination conditions
-    if iter_num > max_iters:
-        break
 
 if ddp:
     destroy_process_group()

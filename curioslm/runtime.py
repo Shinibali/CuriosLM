@@ -74,9 +74,12 @@ def enable_tf32():
 
 # Dense (non-sparsity-inflated) tensor-core throughput at bf16/fp16, in FLOP/s. Vendors
 # headline the 2x "with sparsity" number; an inflated peak understates MFU.
+# Matched by substring in dict order, so the H100 variants must precede the bare 'H100' (SXM).
 _CUDA_PEAK_FLOPS = {
     'H200': 989e12,
-    'H100': 989e12,       # SXM. PCIe is ~756e12 — override if that's the card.
+    'H100 NVL': 835e12,
+    'H100 PCIe': 756e12,
+    'H100': 989e12,       # SXM, reported as "NVIDIA H100 80GB HBM3"
     'A100': 312e12,
     'L40S': 362e12,
     'A6000': 155e12,
@@ -95,9 +98,13 @@ def peak_flops(dev_type, override=0.0):
         return override
     if dev_type != 'cuda':
         return None
-    name = torch.cuda.get_device_name()
+    return peak_flops_for_name(torch.cuda.get_device_name())
+
+
+def peak_flops_for_name(device_name):
+    """Look up a CUDA device name in the peak table; None if unknown."""
     for key, flops in _CUDA_PEAK_FLOPS.items():
-        if key.lower() in name.lower():
+        if key.lower() in device_name.lower():
             return flops
     return None
 
