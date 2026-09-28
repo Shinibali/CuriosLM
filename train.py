@@ -91,12 +91,14 @@ assert attention_window is None or attention_window <= block_size, \
 ddp = int(os.environ.get('RANK', -1)) != -1
 
 if ddp:
-    init_process_group(backend=backend)
     ddp_rank = int(os.environ['RANK'])
     ddp_local_rank = int(os.environ['LOCAL_RANK'])
     ddp_world_size = int(os.environ['WORLD_SIZE'])
     device = f'cuda:{ddp_local_rank}'
     torch.cuda.set_device(device)
+    # Bind this rank to its GPU explicitly: otherwise NCCL guesses the device from the *global*
+    # rank, which can hang when ranks span several nodes.
+    init_process_group(backend=backend, device_id=torch.device(device) if backend == 'nccl' else None)
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     seed_offset = ddp_rank # each process gets a different seed
     # ddp_world_size num of processes will train simultaneously so we can scale down grad accum steps accordingly
@@ -133,6 +135,8 @@ if master_process:
 #-------------------------------------------------------------------
 
 get_batch = data.make_get_batch(dataset, block_size, batch_size, device, device_type)
+train_loader = None
+eval_loaders = None
 if dataset == 'fineweb_edu':
     # ddp_local_rank == 0, not master_process: every node needs its own local copy, and
     # master_process is true on only one process cluster-wide
@@ -142,10 +146,14 @@ if dataset == 'fineweb_edu':
     if ddp:
         barrier()
 
+    # mechanism to not silently eat up trianing tokens
     train_loader = ShardedDataLoader( dataset, "train", block_size, batch_size, ddp_rank, ddp_world_size, device, device_type)
-    val_loader = ShardedDataLoader( dataset, "val", block_size, batch_size, ddp_rank, ddp_world_size, device, device_type)
+    eval_loaders = {split: ShardedDataLoader( dataset, split, block_size, batch_size, ddp_rank, ddp_world_size, device, device_type) for split in ["train", "val"]} 
 
-    get_batch = lambda x: train_loader.next_batch() if x == "train" else val_loader.next_batch()
+    def get_batch(split):
+        # this goes for training only, not evals
+        assert split == "train", "evaluation reads eval_loaders, not the training stream"
+        return train_loader.next_batch() 
 
 #-------------------------------------------------------------------
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -180,6 +188,8 @@ elif init_from == 'resume':
     model, model_args = checkpoints.build_model(checkpoint, overrides={'dropout': dropout})
     iter_num = checkpoint['iter_num']
     best_val_loss = checkpoint['best_val_loss']
+    if train_loader is not None and checkpoint.get('train_loader_state') is not None:
+        train_loader.load_state_dict(checkpoint['train_loader_state'])
 
 elif init_from.startswith('gpt2'):
     print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
@@ -195,13 +205,16 @@ elif init_from.startswith('gpt2'):
 #-------------------------------------------------------------------
 
 model.to(device)
+n_params = model.get_num_params() # read before compile/DDP wrap the model
 
 scaler = runtime.grad_scaler(device_type, dtype)
 
 # optimizer
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
+wandb_run_id = None
 if init_from == 'resume':
     optimizer.load_state_dict(checkpoint['optimizer'])
+    wandb_run_id = checkpoint['config'].get('wandb_run_id') # continue the same wandb run, not a new one
 checkpoint = None # free up memory
 
 if compile:
@@ -217,9 +230,11 @@ def estimate_loss():
     out = {}
     model.eval()
     for split in ['train', 'val']:
+        if eval_loaders is not None:
+            eval_loaders[split].reset()
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y = get_batch(split)
+            X, Y = eval_loaders[split].next_batch() if eval_loaders is not None else get_batch(split)
             with ctx:
                 logits, loss = model(X, Y)
             losses[k] = loss.item()
@@ -230,12 +245,18 @@ def estimate_loss():
 # logging
 if wandb_log and master_process:
     import wandb
-    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+    wandb.init(project=wandb_project, name=wandb_run_name, config={**config, 'n_params': n_params},
+               id=wandb_run_id, resume='allow' if wandb_run_id else None)
+    # tokens seen is the x-axis: the unit training curves are compared in across runs and papers
+    wandb.define_metric("tokens")
+    wandb.define_metric("*", step_metric="tokens")
+    config['wandb_run_id'] = wandb.run.id # saved in every checkpoint, so a resume can reattach
 
 #-------------------------------------------------------------------
 # training loop
 #-------------------------------------------------------------------
 
+train_state = train_loader.state_dict() if train_loader is not None else None
 X, Y = get_batch('train') # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0 # number of iterations in the lifetime of this process
@@ -255,17 +276,12 @@ while True:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
-            metrics = {
+            wandb.log({
+                "tokens": iter_num * tokens_per_iter,
                 "iter": iter_num,
-                "train/loss": losses['train'],
+                "train/loss": losses['train'], # mean over eval_iters batches: the precise numbers
                 "val/loss": losses['val'],
-                "lr": lr,
-                "mfu": running_mfu*100, # convert to percentage
-            }
-            peak_mem = runtime.peak_memory_gb(device_type)
-            if peak_mem is not None:
-                metrics["peak_mem_gb"] = peak_mem
-            wandb.log(metrics)
+            })
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val'].item()
             if iter_num > 0:
@@ -274,6 +290,7 @@ while True:
                     os.path.join(out_dir, 'ckpt.pt'),
                     model=raw_model, optimizer=optimizer, model_args=model_args,
                     iter_num=iter_num, best_val_loss=best_val_loss, config=config,
+                    train_loader_state=train_state
                 )
                 # get it off this pod's ephemeral disk immediately; async so a multi-GB
                 # upload never blocks the training loop
@@ -291,13 +308,15 @@ while True:
             logits, loss = model(X, Y)
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
+        train_state = train_loader.state_dict() if train_loader is not None else None
         X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient
+    grad_norm = None
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip) # pre-clip norm
     # step the optimizer and scaler if training in fp16
     scaler.step(optimizer)
     scaler.update()
@@ -318,6 +337,24 @@ while True:
         peak_mem = runtime.peak_memory_gb(device_type)
         mem_str = f"{peak_mem:.2f}GB" if peak_mem is not None else "n/a"
         print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {mfu_str}, peak mem {mem_str}")
+        if wandb_log:
+            step_metrics = {
+                "tokens": iter_num * tokens_per_iter,
+                "iter": iter_num,
+                "train/loss_step": lossf, # one batch on rank 0: noisy, but dense
+                "lr": lr,
+            }
+            if grad_norm is not None:
+                step_metrics["grad_norm"] = grad_norm.item()
+            # skip compile warm-up, and eval iterations whose dt also contains the eval
+            if local_iter_num >= 5 and iter_num % eval_interval != 0:
+                step_metrics["time/iter_ms"] = dt * 1000
+                step_metrics["throughput/tokens_per_sec"] = tokens_per_iter / dt
+            if running_mfu >= 0: # -1.0 means not measured yet; logging it would plot as -100%
+                step_metrics["mfu"] = running_mfu * 100
+            if peak_mem is not None:
+                step_metrics["peak_mem_gb"] = peak_mem
+            wandb.log(step_metrics)
     iter_num += 1
     local_iter_num += 1
 

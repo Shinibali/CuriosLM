@@ -15,8 +15,9 @@ def fake_data_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def write_shard(directory, split, index, tokens):
-    np.save(os.path.join(directory, f"fineweb_{split}_{index:06d}.npy"), np.asarray(tokens, dtype=np.uint16))
+def write_shard(directory, split, index, tokens, dataset="fineweb_edu"):
+    """Same filename scheme prepare.py writes."""
+    np.save(os.path.join(directory, f"{dataset}_{split}_{index:06d}.npy"), np.asarray(tokens, dtype=np.uint16))
 
 
 def make_loader(*args, **kwargs):
@@ -36,7 +37,17 @@ def test_shard_discovery_filters_by_split_and_sorts_numerically(fake_data_dir):
     loader = make_loader("fineweb_edu", "train", block_size=2, batch_size=1, rank=0, world_size=1)
 
     names = [os.path.basename(p) for p in loader.shards]
-    assert names == ["fineweb_train_000001.npy", "fineweb_train_000002.npy", "fineweb_train_000003.npy"]
+    assert names == ["fineweb_edu_train_000001.npy", "fineweb_edu_train_000002.npy", "fineweb_edu_train_000003.npy"]
+
+
+def test_shard_discovery_ignores_files_from_another_naming_scheme(fake_data_dir):
+    """A stray shard whose name merely contains the split (the old "fineweb_val_*" leftover) is not a shard."""
+    write_shard(fake_data_dir, "val", 0, np.arange(4))
+    write_shard(fake_data_dir, "val", 0, np.arange(4), dataset="fineweb")
+
+    loader = make_loader("fineweb_edu", "val", block_size=2, batch_size=1, rank=0, world_size=1)
+
+    assert [os.path.basename(p) for p in loader.shards] == ["fineweb_edu_val_000000.npy"]
 
 
 def test_reset_sets_shard_zero_and_rank_offset_position(fake_data_dir):
@@ -170,3 +181,33 @@ def test_split_val_and_train_use_disjoint_shard_files(fake_data_dir):
 def test_missing_shards_raises_clear_error(fake_data_dir):
     with pytest.raises(AssertionError, match="no shards found"):
         make_loader("fineweb_edu", "train", block_size=4, batch_size=2, rank=0, world_size=1)
+
+
+@pytest.mark.parametrize("consumed", [0, 1, 3, 4, 7])  # 4 and 7 land past a shard boundary
+def test_state_dict_resumes_every_rank_from_rank_zeros_state(fake_data_dir, consumed):
+    """Only rank 0 saves a checkpoint, so its state alone must put every rank back exactly."""
+    for index in range(3):
+        write_shard(fake_data_dir, "train", index, np.arange(40) + 1000 * index)
+    make = lambda rank: make_loader("fineweb_edu", "train", block_size=4, batch_size=1, rank=rank, world_size=2)
+
+    original = [make(0), make(1)]
+    for _ in range(consumed):
+        for loader in original:
+            loader.next_batch()
+    state = original[0].state_dict()
+
+    resumed = [make(0), make(1)]
+    for loader in resumed:
+        loader.load_state_dict(state)
+
+    for _ in range(5):
+        for before, after in zip(original, resumed):
+            assert torch.equal(before.next_batch()[0], after.next_batch()[0])
+
+
+def test_load_state_dict_rejects_a_different_batch_layout(fake_data_dir):
+    write_shard(fake_data_dir, "train", 0, np.arange(40))
+    state = make_loader("fineweb_edu", "train", block_size=4, batch_size=1, rank=0, world_size=1).state_dict()
+
+    with pytest.raises(AssertionError):
+        make_loader("fineweb_edu", "train", block_size=4, batch_size=2, rank=0, world_size=1).load_state_dict(state)

@@ -20,7 +20,8 @@ globals().update(cfg.flatten(
     cfg.RuntimeConfig(), # device, precision, compile, seed
 ))
 init_from = 'resume' # sampling defaults to a checkpoint; IOConfig defaults to 'scratch'
-out_dir = cfg.IOConfig().out_dir
+out_dir = cfg.IOConfig().out_dir # picks the run: its checkpoint lives at <out_dir>/ckpt.pt locally and on HF
+hf_checkpoint_repo_id = cfg.IOConfig().hf_checkpoint_repo_id
 compile = False # compiling costs ~a minute, and sampling is short
 
 exec(open(runtime.package_path('configurator.py')).read()) # overrides from command line or config file
@@ -40,8 +41,10 @@ print(runtime.describe(device, dtype, compile))
 # model
 checkpoint = None
 if init_from == 'resume':
-    # init from a model saved in a specific directory
-    checkpoint = checkpoints.load(os.path.join(out_dir, 'ckpt.pt'), map_location=device)
+    ckpt_path = os.path.join(out_dir, 'ckpt.pt')
+    if not os.path.exists(ckpt_path): # trained on a GPU pod: only the staging repo has it
+        checkpoints.download_checkpoint(out_dir, hf_checkpoint_repo_id)
+    checkpoint = checkpoints.load(ckpt_path, map_location=device)
     # dropout off for sampling regardless of what the model was trained with
     model, _ = checkpoints.build_model(checkpoint, overrides={'dropout': 0.0})
 elif init_from.startswith('gpt2'):

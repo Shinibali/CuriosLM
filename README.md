@@ -68,6 +68,9 @@ GPU/node count, since `max_iters` has to hit the target token budget at whatever
 ```bash
 uv run python sample.py --out_dir=out-shakespeare --device=mps --num_samples=2 --max_new_tokens=100
 ```
+`--out_dir` picks the run. If `<out_dir>/ckpt.pt` isn't on local disk (e.g. it was trained on a GPU pod),
+it's downloaded from the checkpoint staging repo first — so `--out_dir=out-ladder-fineweb_edu-a2` samples
+that rung wherever it was trained.
 
 ## Data prep
 

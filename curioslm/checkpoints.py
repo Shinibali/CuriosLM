@@ -43,7 +43,7 @@ def strip_compile_prefix(state_dict):
     return state_dict
 
 
-def save(path, model, optimizer, model_args, iter_num, best_val_loss, config):
+def save(path, model, optimizer, model_args, iter_num, best_val_loss, config,  train_loader_state=None):
     """Write the checkpoint atomically: temp file then rename, so a crash mid-write can't
     leave a truncated file where the only good checkpoint used to be."""
     torch.save({
@@ -53,6 +53,7 @@ def save(path, model, optimizer, model_args, iter_num, best_val_loss, config):
         'iter_num': iter_num,
         'best_val_loss': best_val_loss,
         'config': config,
+        "train_loader_state": train_loader_state, # None for datasets sampled at random
     }, f'{path}.tmp')
     os.replace(f'{path}.tmp', path)
 
@@ -94,7 +95,15 @@ def upload_checkpoint_async(out_dir, repo_id):
     """Non-blocking upload_checkpoint: returns a Future immediately so the training loop never
     stalls on the transfer. concurrent.futures' atexit hook joins the pool, so a run's final
     upload still finishes even though nothing here waits on it."""
-    return _upload_pool.submit(upload_checkpoint, out_dir, repo_id)
+    future = _upload_pool.submit(upload_checkpoint, out_dir, repo_id)
+    future.add_done_callback(_report_upload_failure)
+    return future
+
+
+def _report_upload_failure(future):
+    # Nothing ever reads the Future's result, so without this a failed upload would vanish silently.
+    if future.exception() is not None:
+        print(f"checkpoint upload FAILED: {future.exception()!r}", flush=True)
 
 
 def download_checkpoint(out_dir, repo_id):

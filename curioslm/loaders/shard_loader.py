@@ -28,7 +28,11 @@ class ShardedDataLoader:
         self.device_type = device_type
 
         dataset_dir = data_dir(dataset_name)
-        self.shards = sorted([os.path.join(dataset_dir, filename) for filename in os.listdir(dataset_dir) if split in filename])
+        # Exact prepare.py naming, not a substring match: `split in filename` once let a stray
+        # "fineweb_val_000000.npy" in as a second val shard.
+        prefix = f"{dataset_name}_{split}_"
+        self.shards = sorted([os.path.join(dataset_dir, filename) for filename in os.listdir(dataset_dir)
+                              if filename.startswith(prefix) and filename.endswith(".npy")])
 
         assert len(self.shards) > 0, f"no shards found for split {split!r} in {data_dir(dataset_name)}"
 
@@ -46,6 +50,26 @@ class ShardedDataLoader:
 
         return np.load(self.shards[shard_index])
 
+    def state_dict(self):
+        """Where this loader is, rank-independent, so rank 0's copy can restore every rank."""
+
+        offset = self.rank * self.batch_size * self.block_size
+        return {
+            "shard_index": self.current_shard_index,
+            "position": self.current_position - offset, # offset such that when resumed, it starts from tokens in the interrupted batch
+            "batch_size": self.batch_size,
+            "block_size": self.block_size,
+            "world_size": self.world_size
+        }
+
+    def load_state_dict(self, state):
+        """Resume exactly where state_dict() left off, at this rank's own offset."""
+
+        assert self.batch_size == state["batch_size"] and self.world_size == state["world_size"] and self.block_size == state['block_size'], f"batch_size, block_size, world_size ({state["batch_size"], state["block_size"], state["world_size"]}) in ShardLoader `state` differs from parameters initialized in this run ({self.batch_size, self.block_size, self.world_size})"
+
+        self.current_shard_index = state["shard_index"]
+        self.tokens = self._load_shard(self.current_shard_index)           
+        self.current_position = state["position"] + self.rank * self.batch_size * self.block_size  # R * B * T      
 
     def next_batch(self):
         """This rank's next (x, y) batch, each (batch_size, block_size); y is x shifted by one."""
