@@ -17,10 +17,11 @@ n_head = 12
 n_embd = 768
 block_size = 1024
 
-# Single-GPU placeholders -- recompute batch_size/gradient_accumulation_steps/max_iters/
-# lr_decay_iters for the real GPU count, so max_iters still hits ~1.5B tokens.
-batch_size = 12
-gradient_accumulation_steps = 40
+# Calibrated on 2x H100 80GB: micro-batch 60 is within 0.2% MFU of the largest that fits, with half the
+# memory spare. grad accum is global (train.py divides it by world_size), so every step is
+# 60 * 8 * 1024 = 491,520 tokens on any GPU count that divides 8, and 3052 steps is ~1.5B tokens.
+batch_size = 60
+gradient_accumulation_steps = 8
 max_iters = 3052
 lr_decay_iters = 3052
 learning_rate = 6e-4
