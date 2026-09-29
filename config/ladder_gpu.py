@@ -4,6 +4,7 @@
 #   LADDER_RUNG=a2 uv run python train.py config/ladder_gpu.py --device=cuda
 #   LADDER_RUNG=a2 LADDER_DATASET=cosmopedia_v2 uv run python train.py config/ladder_gpu.py --device=cuda
 #   LADDER_RUNG=a3 LADDER_SEED=1338 ...   # a second seed of a rung (the default seed is 1337)
+#   LADDER_RUNG=a4 LADDER_BUDGET=9.8B ... # the headline runs (default budget 1.5B)
 #
 # A data-mixture study doesn't belong here: it varies a mixture ratio rather than an architecture
 # rung, and the loader reads only one dataset at a time today.
@@ -11,7 +12,6 @@
 import os
 
 dataset = os.environ.get('LADDER_DATASET', 'fineweb_edu')
-wandb_project = 'curioslm-ladder'
 
 n_layer = 12
 n_head = 12
@@ -20,17 +20,26 @@ block_size = 1024
 
 # Calibrated on 2x H100 80GB: micro-batch 60 is within 0.2% MFU of the largest that fits, with half the
 # memory spare. grad accum is global (train.py divides it by world_size), so every step is
-# 60 * 8 * 1024 = 491,520 tokens on any GPU count that divides 8, and 3052 steps is ~1.5B tokens.
+# 60 * 8 * 1024 = 491,520 tokens on any GPU count that divides 8.
 batch_size = 60
 gradient_accumulation_steps = 8
-max_iters = 3052
-lr_decay_iters = 3052
 learning_rate = 6e-4
 min_lr = 6e-5
-warmup_iters = 200
 beta2 = 0.95
-eval_interval = 250
 eval_iters = 100
+
+# Token budget, picked by LADDER_BUDGET. 1.5B is the architecture ladder. 9.8B is the headline runs: 20,000
+# steps stays inside one pass over the 99 train shards on any GPU count (the loader skips each shard's last
+# partial batch, so a pass is ~20,097 steps), with GPT-3's ~375M-token warmup and fewer, costlier evals.
+BUDGETS = {
+    '1.5B': dict(max_iters=3052, lr_decay_iters=3052, warmup_iters=200, eval_interval=250,
+                 wandb_project='curioslm-ladder'),
+    '9.8B': dict(max_iters=20000, lr_decay_iters=20000, warmup_iters=760, eval_interval=1000,
+                 wandb_project='curioslm-headline'),
+}
+budget = os.environ.get('LADDER_BUDGET', '1.5B')
+globals().update(BUDGETS[budget])  # KeyError on an unknown budget
+budget_suffix = '' if budget == '1.5B' else f'-{budget}'
 log_interval = 10
 always_save_checkpoint = True
 wandb_log = True
@@ -57,6 +66,6 @@ if 'LADDER_SEED' in os.environ:
     seed_suffix = f'-s{seed}'
 # dataset is always in the name: the same rung on two datasets must never share an out_dir,
 # or one silently overwrites the other's checkpoint
-out_dir = f'out-ladder-{dataset}-{rung}{seed_suffix}'
-wandb_run_name = f'ladder-{dataset}-{rung}{seed_suffix}'
+out_dir = f'out-ladder-{dataset}-{rung}{budget_suffix}{seed_suffix}'
+wandb_run_name = f'ladder-{dataset}-{rung}{budget_suffix}{seed_suffix}'
 globals().update(RUNGS[rung])  # e.g. KeyError: 'a9' if mistyped
