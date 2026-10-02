@@ -28,3 +28,6 @@ RUNPOD_RUNBOOK.md
 
 # snapshots of the internal docs above, taken before restructuring them
 docs-archive/
+
+# eval per-example samples are large and regenerable; results.json files are kept
+evals/*/samples_*.jsonl

@@ -20,6 +20,9 @@ analysis = [
     "circuitsvis>=1.43.3",
     "matplotlib>=3.11.2",
 ]
+eval = [
+    "lm-eval>=0.4.13",
+]
 
 [dependency-groups]
 dev = [

@@ -20,6 +20,12 @@ this project — see [astral.sh/uv](https://docs.astral.sh/uv/getting-started/in
 not). `uv sync` reads this repo's own `pyproject.toml`/`uv.lock` and builds a `.venv` right
 here with every dependency locked to an exact, reproducible version.
 
+Two optional extras, for work beyond training:
+```bash
+uv sync --extra eval        # lm-eval, for evaluate.py
+uv sync --extra analysis    # matplotlib + circuitsvis, for analysis/
+```
+
 ## Setup (every session)
 
 No manual venv activation needed — every command below uses `uv run`, which finds this
@@ -49,19 +55,19 @@ on a fresh machine will pull the full ~19GB before anything trains. `--max_iters
 **The architecture ladder (A0-A4, real 124M/~1.5B-token scale, not the dev configs above):**
 ```bash
 LADDER_RUNG=a2 uv run python train.py config/ladder_gpu.py --device=cuda
-# rerun the same ladder on Cosmopedia-v2 instead of FineWeb-Edu (Phase 6's robustness check):
-LADDER_RUNG=a2 LADDER_DATASET=cosmopedia_v2 uv run python train.py config/ladder_gpu.py --device=cuda
+LADDER_RUNG=a2 LADDER_DATASET=cosmopedia_v2 uv run ...   # same rung on Cosmopedia-v2 instead of FineWeb-Edu
+LADDER_RUNG=a4 LADDER_SEED=1338 uv run ...                # a second seed of a rung (default 1337)
+LADDER_RUNG=a4 LADDER_BUDGET=9.8B uv run ...              # the headline runs: 20,000 steps, ~9.8B tokens
 ```
+On several GPUs, launch with `torchrun --standalone --nproc_per_node=<N> train.py config/ladder_gpu.py ...`.
 One file covers the whole ladder, on any dataset — `config/ladder_gpu.py` holds the shared
 settings (124M size, training hyperparameters) plus a `RUNGS` dict of each rung's architecture
 delta over the one before it. `LADDER_RUNG` picks the rung, `LADDER_DATASET` picks the dataset
 (default `fineweb_edu`); rerunning the ladder on a second dataset is just a different env var,
-not a second config file. `out_dir`/`wandb_run_name` always include the dataset name, so the
-same rung on two datasets never collides. `a0`'s entry is empty on purpose — `GPTConfig`'s
-defaults already are the vanilla baseline. `batch_size`/`gradient_accumulation_steps`/
-`max_iters`/`lr_decay_iters` are placeholders sized for a single GPU — recompute for the actual
-GPU/node count, since `max_iters` has to hit the target token budget at whatever
-`tokens_per_iter` that hardware gives.
+not a second config file. `out_dir`/`wandb_run_name` include the dataset, the budget (when not 1.5B) and
+the seed (when set), so runs never collide. `a0`'s entry is empty on purpose — `GPTConfig`'s defaults already
+are the vanilla baseline. Batch settings are calibrated for H100s (micro-batch 60) and gradient accumulation is
+global — `train.py` divides it by the GPU count — so every step is 491,520 tokens on 1, 2, 4 or 8 GPUs.
 
 ## Sample
 
@@ -83,7 +89,13 @@ uv run python data/shakespeare/prepare.py
 ```bash
 uv run python data/fineweb_edu/prepare.py
 ```
-Safe to interrupt (Ctrl+C) and rerun — it checkpoints after every shard and resumes automatically, never re-downloading or duplicating already-written data.
+
+**Cosmopedia-v2** (for the data-mix run — a 51-shard, ~5.1B-token slice of the corpus, seeded shuffle, ~30 min):
+```bash
+uv run python data/cosmopedia_v2/prepare.py
+```
+Both are thin settings files over `data/sharding.py` (tokenize, shard, resume). Safe to interrupt (Ctrl+C) and
+rerun — they checkpoint after every shard and resume automatically, never duplicating already-written data.
 
 ## FineWeb-Edu shards <-> private HF staging repo
 
@@ -92,7 +104,8 @@ uv run python -m curioslm.loaders.hf_shards upload     # local .npy shards -> th
 uv run python -m curioslm.loaders.hf_shards download   # private repo -> local data/fineweb_edu/
 uv run python -m curioslm.loaders.hf_shards cleanup    # delete local shards ONLY once confirmed uploaded (matching filename + byte size)
 ```
-Staging between local prep and wherever GPU training actually runs; `curioslm/config.py`'s `DataConfig.hf_dataset_repo_id` names the repo. Requires being logged in (`hf auth login`) with write access to it. Upload/download are bandwidth-bound (~19GB). `cleanup` only deletes local shards it has verified are on the remote with a matching size — anything unconfirmed is left alone and reported.
+Staging between local prep and wherever GPU training actually runs; `curioslm/config.py`'s `DataConfig.hf_dataset_repo_id` names the repo. The CLI handles `DataConfig`'s dataset (FineWeb-Edu); for Cosmopedia-v2, call the same functions with its names, e.g.
+`uv run python -c "from curioslm.loaders.hf_shards import upload_shards; upload_shards('cosmopedia_v2', 'CuriosLM/cosmopedia_v2-shards')"`. Requires being logged in (`hf auth login`) with write access to it. Upload/download are bandwidth-bound (~19GB). `cleanup` only deletes local shards it has verified are on the remote with a matching size — anything unconfirmed is left alone and reported.
 
 ## Checkpoints <-> private HF staging repo
 
@@ -109,8 +122,35 @@ private-storage quota; the repo holds roughly one checkpoint per run. `init_from
 overwriting. Separate from the polished, public model repos, which get pushed by hand with a
 model card when a headline model is finalized.
 
+## GPU pods
+
+```bash
+ssh -i ~/.ssh/runpod_ed25519 -p <port> root@<ip> 'bash -s' < scripts/pod_setup.sh
+```
+One command from the Mac prepares a fresh pod: checks credentials, installs uv, clones, `uv sync --locked`,
+checks CUDA, downloads the shards. Credentials come from the pod's environment, never the repo.
+
+## Evaluate
+
+```bash
+uv run --extra eval python evaluate.py out-ladder-fineweb_edu-a4 --tasks hellaswag --limit 50    # smoke test
+uv run --extra eval python evaluate.py out-ladder-fineweb_edu-a0-9.8B out-ladder-fineweb_edu-a4-9.8B gpt2
+```
+Benchmarks (default: HellaSwag, ARC-Easy, LAMBADA) run through `curioslm/eval_adapter.py`, which plugs our
+checkpoints into [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) — task
+definitions and scoring are lm-eval's own, so numbers compare with published ones. Each argument is a run
+directory (its checkpoint is downloaded from the staging repo if missing) or `gpt2` for OpenAI's GPT-2 small
+as a reference. Writes `evals/<model>/results.json` plus per-example samples for paired significance tests.
+Runs fine on a Mac (MPS); `--device` overrides.
+
+## Analysis
+
+Scripts that turn runs and checkpoints into figures live in `analysis/`, one folder per study — see
+[`analysis/README.md`](analysis/README.md). Run them from the repo root with `uv run --extra analysis ...`.
+
 ## Tests
 
 ```bash
-uv run python -m pytest -q
+uv run --extra eval python -m pytest -q
 ```
+The eval-adapter tests need the `eval` extra and are skipped without it.
