@@ -1,0 +1,26 @@
+{
+  "curioslm-ladder/mbwli7wj": {
+    "batch_size": 60,
+    "gradient_accumulation_steps": 8,
+    "block_size": 1024,
+    "warmup_iters": 200,
+    "dataset": "fineweb_edu",
+    "world_size": 2
+  },
+  "curioslm-ladder/kpqh0522": {
+    "batch_size": 60,
+    "gradient_accumulation_steps": 8,
+    "block_size": 1024,
+    "warmup_iters": 200,
+    "dataset": "fineweb_edu",
+    "world_size": 2
+  },
+  "curioslm-headline/fp1ka2zx": {
+    "batch_size": 60,
+    "gradient_accumulation_steps": 8,
+    "block_size": 1024,
+    "warmup_iters": 760,
+    "dataset": "fineweb_edu",
+    "world_size": 4
+  }
+}

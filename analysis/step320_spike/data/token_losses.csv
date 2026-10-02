@@ -1,0 +1,159 @@
+passage,position,token,loss
+mangled,0,Of,7.5319
+mangled,1, dose,14.9008
+mangled,2, ki,15.9045
+mangled,3,ww,8.1399
+mangled,4,ed,4.3902
+mangled,5,",",2.5978
+mangled,6, 18,6.4277
+mangled,7,%,2.8941
+mangled,8, were,3.5960
+mangled,9, be,10.3287
+mangled,10,wow,12.6088
+mangled,11, de,8.0372
+mangled,12, age,11.4775
+mangled,13, of,3.0875
+mangled,14, 18,4.3397
+mangled,15, years,2.0409
+mangled,16,",",1.3804
+mangled,17, and,1.6751
+mangled,18, 88,7.5434
+mangled,19,%,0.0790
+mangled,20, were,0.3976
+mangled,21, married,5.6984
+mangled,22,.,1.5053
+mangled,23, Hus,10.0298
+mangled,24,bands,0.9850
+mangled,25,",",3.3490
+mangled,26, bro,6.6390
+mangled,27,d,4.7471
+mangled,28,ers,1.8571
+mangled,29, and,1.1387
+mangled,30, c,4.7251
+mangled,31,w,5.3898
+mangled,32,ose,9.0027
+mangled,33, re,5.5765
+mangled,34,w,2.9533
+mangled,35,atives,6.6210
+mangled,36, were,0.9890
+mangled,37, direct,10.2932
+mangled,38, perpetrators,8.5261
+mangled,39, of,0.4015
+mangled,40, 79,10.8058
+mangled,41,%,0.5193
+mangled,42, of,1.0414
+mangled,43, de,5.9388
+mangled,44, honor,13.8609
+mangled,45, crimes,3.6366
+mangled,46, reported,4.7350
+mangled,47, by,1.7743
+mangled,48, mainstream,9.4546
+mangled,49, media,0.6628
+mangled,50,.,0.5761
+mangled,51, The,2.4847
+mangled,52, med,10.7784
+mangled,53,od,9.7608
+mangled,54, used,8.7098
+mangled,55, for,3.9061
+mangled,56, honor,7.4339
+mangled,57, crime,2.7840
+mangled,58, inc,9.8546
+mangled,59,w,4.5600
+mangled,60,uded,2.6598
+mangled,61, firearms,8.1995
+mangled,62, (,4.1769
+mangled,63,most,6.2109
+mangled,64, common,4.5828
+mangled,65,"),",2.4352
+mangled,66, stabbing,10.3552
+mangled,67,",",1.1017
+mangled,68, axe,8.7408
+mangled,69, and,2.1154
+mangled,70, str,8.5800
+mangled,71,angu,10.6009
+mangled,72,w,8.6163
+mangled,73,ation,4.2353
+mangled,74,",",1.4002
+mangled,75, uh,13.0914
+mangled,76,-,0.9716
+mangled,77,h,0.2732
+mangled,78,ah,0.3590
+mangled,79,-,0.2083
+mangled,80,h,0.1302
+mangled,81,ah,0.0215
+mangled,82,-,0.4078
+mangled,83,h,0.1772
+mangled,84,ah,0.0191
+mangled,85,.,3.2784
+clean,0,Of,7.5319
+clean,1, those,4.7813
+clean,2, killed,7.1133
+clean,3,",",1.8997
+clean,4, 18,5.0766
+clean,5,%,4.1192
+clean,6, were,1.6862
+clean,7, below,8.4000
+clean,8, the,0.4152
+clean,9, age,1.8925
+clean,10, of,0.0877
+clean,11, 18,1.2225
+clean,12, years,4.3278
+clean,13,",",1.3243
+clean,14, and,1.5419
+clean,15, 88,6.9217
+clean,16,%,0.0913
+clean,17, were,0.5185
+clean,18, married,3.8615
+clean,19,.,0.9134
+clean,20, Hus,10.2193
+clean,21,bands,0.3900
+clean,22,",",2.9126
+clean,23, brothers,6.3106
+clean,24, and,0.5983
+clean,25, close,7.8681
+clean,26, relatives,1.7276
+clean,27, were,1.1262
+clean,28, direct,10.0171
+clean,29, perpetrators,6.2256
+clean,30, of,0.1473
+clean,31, 79,12.5080
+clean,32,%,0.9570
+clean,33, of,0.5776
+clean,34, the,1.9271
+clean,35, honor,14.4858
+clean,36, crimes,3.0939
+clean,37, reported,3.8036
+clean,38, by,1.5203
+clean,39, mainstream,10.0785
+clean,40, media,0.8041
+clean,41,.,0.5389
+clean,42, The,2.5837
+clean,43, method,9.6778
+clean,44, used,1.6556
+clean,45, for,3.1445
+clean,46, honor,9.0908
+clean,47, crime,3.3329
+clean,48, included,4.7266
+clean,49, firearms,6.7055
+clean,50, (,3.8484
+clean,51,most,5.6810
+clean,52, common,2.9172
+clean,53,"),",1.6248
+clean,54, stabbing,9.1050
+clean,55,",",0.6401
+clean,56, axe,9.5143
+clean,57, and,2.1116
+clean,58, strang,9.6577
+clean,59,ulation,0.1551
+clean,60,",",0.5150
+clean,61, uh,14.1008
+clean,62,-,0.5231
+clean,63,h,0.2157
+clean,64,ah,0.4364
+clean,65,-,0.1034
+clean,66,h,0.0873
+clean,67,ah,0.0205
+clean,68,-,0.3701
+clean,69,h,0.1290
+clean,70,ah,0.0163
+clean,71,.,3.7715

@@ -15,6 +15,12 @@ dependencies = [
     "wandb>=0.28.1",
 ]
 
+[project.optional-dependencies]
+analysis = [
+    "circuitsvis>=1.43.3",
+    "matplotlib>=3.11.2",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",

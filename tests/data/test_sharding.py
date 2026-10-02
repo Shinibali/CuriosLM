@@ -3,9 +3,11 @@ import json
 import numpy as np
 import pytest
 
-from data.fineweb_edu.prepare import (
+import data.sharding as sharding
+from data.sharding import (
     EOT,
     load_checkpoint,
+    prepare,
     save_checkpoint,
     shard_tokens,
     tokenize,
@@ -107,44 +109,67 @@ def test_tokenize_prepends_eot_and_uses_uint16():
     assert len(tokens) > 1  # EOT plus at least one real token
 
 
-def test_write_shard_naming_and_split(tmp_path, monkeypatch):
+def test_write_shard_naming_and_split(tmp_path):
     """Shard 0 is held out as val, every other shard is train."""
-    import data.fineweb_edu.prepare as prepare_module
-    monkeypatch.setattr(prepare_module, "DATA_DIR", str(tmp_path))
-
-    write_shard(0, np.array([1, 2, 3], dtype=np.uint16))
-    write_shard(1, np.array([4, 5], dtype=np.uint16))
+    write_shard(str(tmp_path), "fineweb_edu", 0, np.array([1, 2, 3], dtype=np.uint16))
+    write_shard(str(tmp_path), "fineweb_edu", 1, np.array([4, 5], dtype=np.uint16))
 
     assert (tmp_path / "fineweb_edu_val_000000.npy").exists()
     assert (tmp_path / "fineweb_edu_train_000001.npy").exists()
     assert np.array_equal(np.load(tmp_path / "fineweb_edu_val_000000.npy"), [1, 2, 3])
 
 
-def test_checkpoint_round_trip(tmp_path, monkeypatch):
-    import data.fineweb_edu.prepare as prepare_module
-    monkeypatch.setattr(prepare_module, "CHECKPOINT_PATH", str(tmp_path / "checkpoint.json"))
+def test_checkpoint_round_trip(tmp_path):
+    path = str(tmp_path / "checkpoint.json")
+    assert load_checkpoint(path, shard_size=100) is None  # nothing saved yet
 
-    assert load_checkpoint() is None  # nothing saved yet
-
-    save_checkpoint(next_shard_index=7, docs_read=12345)
-    state = load_checkpoint()
+    save_checkpoint(path, shard_size=100, next_shard_index=7, docs_read=12345)
+    state = load_checkpoint(path, shard_size=100)
 
     assert state["next_shard_index"] == 7
     assert state["docs_read"] == 12345
-    assert state["shard_size"] == prepare_module.SHARD_SIZE
+    assert state["shard_size"] == 100
 
 
-def test_checkpoint_rejects_mismatched_shard_size(tmp_path, monkeypatch):
-    """Resuming with a different SHARD_SIZE would produce inconsistent shards -- fail loudly."""
+def test_checkpoint_rejects_mismatched_shard_size(tmp_path):
+    """Resuming with a different shard size would produce inconsistent shards -- fail loudly."""
     checkpoint_path = tmp_path / "checkpoint.json"
     checkpoint_path.write_text(json.dumps({"shard_size": 999, "next_shard_index": 1, "docs_read": 1}))
 
-    import data.fineweb_edu.prepare as prepare_module
-    monkeypatch.setattr(prepare_module, "CHECKPOINT_PATH", str(checkpoint_path))
-    assert prepare_module.SHARD_SIZE != 999  # sanity: the mismatch is real
+    with pytest.raises(AssertionError):
+        load_checkpoint(str(checkpoint_path), shard_size=100)
+
+
+def test_checkpoint_rejects_mismatched_shuffle_seed(tmp_path):
+    """A different seed replays a different document order, so skip() would land in the wrong place."""
+    path = str(tmp_path / "checkpoint.json")
+    save_checkpoint(path, shard_size=100, next_shard_index=1, docs_read=1, seed=1337)
 
     with pytest.raises(AssertionError):
-        load_checkpoint()
+        load_checkpoint(path, shard_size=100, seed=1338)
+
+
+class _FakeStream(list):
+    """Stands in for a streaming HF dataset: iterable, with the shuffle/skip the driver calls."""
+    def shuffle(self, seed, buffer_size):
+        return self
+
+    def skip(self, n):
+        return _FakeStream(self[n:])
+
+
+def test_prepare_capped_writes_only_full_shards_and_clears_checkpoint(tmp_path, monkeypatch):
+    """max_shards stops after that many full shards, never writes a short one, and a finished run
+    removes its resume checkpoint."""
+    docs = _FakeStream({"text": "hello world " * 20} for _ in range(50))
+    monkeypatch.setattr(sharding, "load_dataset", lambda *a, **k: docs)
+
+    prepare("toy", str(tmp_path), "src", "cfg", shard_size=100, max_shards=3, shuffle_seed=1)
+
+    shards = sorted(p.name for p in tmp_path.glob("*.npy"))
+    assert shards == ["toy_train_000001.npy", "toy_train_000002.npy", "toy_val_000000.npy"]
+    assert all(len(np.load(tmp_path / s)) == 100 for s in shards)
+    assert not (tmp_path / sharding.CHECKPOINT_NAME).exists()
 
 
 def test_streaming_pull_has_no_duplicate_tokens_end_to_end():

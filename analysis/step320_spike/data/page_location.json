@@ -1,0 +1,8 @@
+{
+  "shard": "data/fineweb_edu/fineweb_edu_train_000002.npy",
+  "offset": 57753600,
+  "sequence": 33,
+  "block_size": 1024,
+  "mean_loss": 5.0566,
+  "batch_median_loss": 3.825
+}
