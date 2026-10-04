@@ -1,0 +1,17 @@
+{
+  "model": "out-ladder-fineweb_edu-a0-9.8B",
+  "limit": null,
+  "results": {
+    "wikitext": {
+      "name": "wikitext",
+      "alias": "wikitext",
+      "sample_len": 62,
+      "word_perplexity,none": 41.51444349833083,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 2.0072956488477103,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 1.0052531227860397,
+      "bits_per_byte_stderr,none": "N/A"
+    }
+  }
+}

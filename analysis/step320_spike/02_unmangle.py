@@ -9,7 +9,7 @@ the already-corrected text before it. That is how `Of dose` becomes `Of those` w
 Running it writes the clean page to data/page_clean.txt and every change, with the runner-up and the log-prob
 margin, to data/unmangle_changes.csv, so each decision can be checked by eye.
 
-    uv run --extra analysis python analysis/step320_spike/02_unmangle.py
+    uv run --extra analysis --extra eval python analysis/step320_spike/02_unmangle.py
 """
 import csv
 import itertools
@@ -18,8 +18,6 @@ import os
 
 import numpy as np
 import tiktoken
-import torch
-import torch.nn.functional as F
 
 import page  # also puts analysis/ on sys.path
 from common import models  # noqa: E402
@@ -43,26 +41,6 @@ def candidates(word):
     return sorted({"".join(p) for p in itertools.product(*options)})  # every combination: 2^(rule sites) spellings
 
 
-@torch.no_grad()
-def score(model, enc, prefix_ids, segments, device):
-    """Log-probability of each text segment following prefix_ids."""
-    prefix = prefix_ids[-CONTEXT:]  # same recent context for every candidate
-    seg_ids = [enc.encode_ordinary(s) for s in segments]  # candidates differ in token count
-    width = len(prefix) + max(len(s) for s in seg_ids)  # T: fits the longest candidate
-    x = torch.zeros(len(segments), width, dtype=torch.long)  # (B,T), B = one row per candidate
-    for i, s in enumerate(seg_ids):
-        ids = prefix + s
-        x[i, :len(ids)] = torch.tensor(ids)  # right-padded: causal attention never sees the padding
-    logits, _ = model(x.to(device), torch.zeros_like(x).to(device))  # dummy targets: we want every position (B,T,vocab_size)
-    logp = F.log_softmax(logits.float(), dim=-1).cpu() # (B,T, vocab_size)
-    out = []
-    for i, s in enumerate(seg_ids):
-        pos = torch.arange(len(prefix) - 1, len(prefix) - 1 + len(s))  # logits at t predict token t+1
-        # Adding logs is multiplying probabilities: log [ p(1 | A B C) × p(2 | A B C 1) ...] = log p(the whole candidate | prefix)
-        out.append(logp[i, pos, torch.tensor(s)].sum().item())  # each token's log-prob, summed: log p(segment | prefix), 
-    return out
-
-
 def unmangle(model, enc, text, device):
     """Returns (clean text, list of changes). Words are fixed left to right, each seeing the fixed text before it."""
     out, changes, prefix_ids, last = [], [], [enc.eot_token], 0  # prefix starts at a document boundary
@@ -72,7 +50,8 @@ def unmangle(model, enc, text, device):
         if len(cands) == 1:  # no w, d or final f: nothing to decide
             best = cands[0]
         else:
-            logps = score(model, enc, prefix_ids, [gap + c for c in cands], device)  # with its gap: " those"
+            continuations = [enc.encode_ordinary(gap + c) for c in cands]  # with its gap: " those"
+            logps = models.continuation_logprobs(model, prefix_ids[-CONTEXT:], continuations, device)
             ranked = sorted(zip(logps, cands), reverse=True)  # most likely spelling first
             best = ranked[0][1]
             if best != word:
@@ -90,7 +69,7 @@ def locate_page(model, device):
     """Replay the loader to the spike's logged batch and pick its worst-scoring sequence: that's the page.
     Recorded in page_location.json for page.load_sequence()."""
     shard, offset, batch = page.logged_batch()
-    mean_losses = [sum(models.token_losses(model, seq.tolist(), device)) / (len(seq) - 1) for seq in batch]  # per sequence
+    mean_losses = [sum(models.token_losses(model, seq.tolist(), device)) / (len(seq) - 1) for seq in batch]  # each row
     worst = max(range(len(mean_losses)), key=mean_losses.__getitem__)  # argmax: the highest-loss sequence
     loc = {"shard": os.path.relpath(shard, page.ROOT),  # relative to the repo: portable, no local paths
            "offset": offset, "sequence": worst, "block_size": batch.shape[1] - 1,  # batch rows hold block_size + 1
@@ -104,7 +83,7 @@ def locate_page(model, device):
 def main():
     device = models.device()
     enc = tiktoken.get_encoding("gpt2")
-    model = models.load_model(page.CKPT, device)
+    model = models.load_model(page.run_config()["out_dir"], device)
     os.makedirs(page.DATA, exist_ok=True)
     locate_page(model, device)
     text = enc.decode(page.load_sequence())

@@ -1,0 +1,17 @@
+{
+  "model": "gpt2",
+  "limit": null,
+  "results": {
+    "wikitext": {
+      "name": "wikitext",
+      "alias": "wikitext",
+      "sample_len": 62,
+      "word_perplexity,none": 37.37251130304445,
+      "word_perplexity_stderr,none": "N/A",
+      "byte_perplexity,none": 1.9682267840662084,
+      "byte_perplexity_stderr,none": "N/A",
+      "bits_per_byte,none": 0.9768964612247544,
+      "bits_per_byte_stderr,none": "N/A"
+    }
+  }
+}

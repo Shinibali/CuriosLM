@@ -51,7 +51,7 @@ def word_losses(text, tokens, losses):
 def main():
     device = models.device()
     enc = tiktoken.get_encoding("gpt2")
-    model = models.load_model(page.CKPT, device)
+    model = models.load_model(page.run_config()["out_dir"], device)
     seq = page.load_sequence()
     if not os.path.exists(page.CLEAN_TXT):
         sys.exit(f"{page.CLEAN_TXT} is missing: run 02_unmangle.py first")

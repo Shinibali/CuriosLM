@@ -1,0 +1,22 @@
+{
+  "curioslm-headline/fp1ka2zx": {
+    "out_dir": "out-ladder-fineweb_edu-a0-9.8B",
+    "dataset": "fineweb_edu",
+    "world_size": 4
+  },
+  "curioslm-headline/2mtqioaa": {
+    "out_dir": "out-ladder-fineweb_edu-a4-9.8B",
+    "dataset": "fineweb_edu",
+    "world_size": 4
+  },
+  "curioslm-ladder/kpqh0522": {
+    "out_dir": "out-ladder-fineweb_edu-a4",
+    "dataset": "fineweb_edu",
+    "world_size": 2
+  },
+  "curioslm-ladder/ilwem9b9": {
+    "out_dir": "out-ladder-fineweb_edu-a4-s1338",
+    "dataset": "fineweb_edu",
+    "world_size": 2
+  }
+}

@@ -14,7 +14,7 @@ import os
 import matplotlib.pyplot as plt
 
 import page  # also puts analysis/ on sys.path
-from common import runs, style  # noqa: E402
+from common import run_ids, runs, style  # noqa: E402
 
 CACHE = os.path.join(page.DATA, "loss_history.csv")
 CONFIG_CACHE = os.path.join(page.DATA, "run_configs.json")
@@ -23,11 +23,11 @@ OUT = os.path.join(page.FIGURES, "loss_spike.png")
 # differs between runs in words a reader needs no project context for: two architectures, two run lengths (which
 # also means two warmups) and 2 vs 4 GPUs. Only the data order is shared.
 RUNS = [
-    ("124M GPT-2, 1.5B-token run", "curioslm-ladder/mbwli7wj"),
-    ("113M Gemma-style, 1.5B-token run", "curioslm-ladder/kpqh0522"),
-    ("124M GPT-2, 9.8B-token run", "curioslm-headline/fp1ka2zx"),
+    ("124M GPT-2, 1.5B-token run", run_ids.LADDER_A0),
+    ("113M Gemma-style, 1.5B-token run", run_ids.LADDER_A4),
+    ("124M GPT-2, 9.8B-token run", run_ids.HEADLINE_A),
 ]
-CONFIG_KEYS = ["batch_size", "gradient_accumulation_steps", "block_size", "warmup_iters", "dataset"]
+CONFIG_KEYS = ["batch_size", "gradient_accumulation_steps", "block_size", "warmup_iters", "dataset", "out_dir"]
 HALF_WINDOW = 40e6  # display choice: tokens shown either side of the spike, enough flat curve to frame it
 
 

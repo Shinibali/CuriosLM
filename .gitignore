@@ -5,7 +5,8 @@ __pycache__/
 
 # training outputs — checkpoints are ~100MB each, never commit them
 out/
-out-*/
+# top-level run folders only, so evals/out-*/ results stay trackable
+/out-*/
 *.pt
 *.ckpt
 *.npy
@@ -29,5 +30,7 @@ RUNPOD_RUNBOOK.md
 # snapshots of the internal docs above, taken before restructuring them
 docs-archive/
 
-# eval per-example samples are large and regenerable; results.json files are kept
-evals/*/samples_*.jsonl
+# eval results are kept (re-included past the parent repo's out-*/ rule); per-example samples are large and
+# regenerable
+!evals/**/out-*/
+evals/**/samples_*.jsonl

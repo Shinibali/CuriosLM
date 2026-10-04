@@ -1,0 +1,33 @@
+{
+  "model": "out-ladder-fineweb_edu-a0-9.8B",
+  "limit": null,
+  "results": {
+    "hellaswag": {
+      "name": "hellaswag",
+      "alias": "hellaswag",
+      "sample_len": 10042,
+      "acc,none": 0.29506074487153955,
+      "acc_stderr,none": 0.004551379838155828,
+      "acc_norm,none": 0.3241386178052181,
+      "acc_norm_stderr,none": 0.004670955399641254
+    },
+    "arc_easy": {
+      "name": "arc_easy",
+      "alias": "arc_easy",
+      "sample_len": 2376,
+      "acc,none": 0.5235690235690236,
+      "acc_stderr,none": 0.010248378585554071,
+      "acc_norm,none": 0.4718013468013468,
+      "acc_norm_stderr,none": 0.010243454104071733
+    },
+    "lambada_openai": {
+      "name": "lambada_openai",
+      "alias": "lambada_openai",
+      "sample_len": 5153,
+      "perplexity,none": 111.0925690276938,
+      "perplexity_stderr,none": 5.1448240486387515,
+      "acc,none": 0.24218901610712207,
+      "acc_stderr,none": 0.00596856244761081
+    }
+  }
+}

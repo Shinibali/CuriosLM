@@ -23,9 +23,16 @@ LOCATION_JSON = os.path.join(DATA, "page_location.json")   # written by 02_unman
 CLEAN_TXT = os.path.join(DATA, "page_clean.txt")           # written by 02_unmangle.py
 CHANGES_CSV = os.path.join(DATA, "unmangle_changes.csv")   # written by 02_unmangle.py
 
-RUN = "curioslm-ladder/kpqh0522"  # the 1.5B-token Gemma-style run: its batches are replayed, its checkpoint scores them
-CKPT = os.path.join(ROOT, "out-ladder-fineweb_edu-a4", "ckpt.pt")
+from common import run_ids  # noqa: E402
+
+RUN = run_ids.LADDER_A4  # the 1.5B-token Gemma-style run: its batches are replayed, its checkpoint scores them
 WORD = re.compile(r"[^\W_]+")  # a word: letters and digits, so "20f" is one word
+
+
+def run_config(run=RUN):
+    """A run's wandb config values, as cached by 01_loss_spike.py (incl. out_dir, dataset, world_size)."""
+    with open(CONFIGS_JSON) as f:
+        return json.load(f)[run]
 
 
 def logged_batch(run=RUN):
@@ -33,8 +40,7 @@ def logged_batch(run=RUN):
     with the run's config: (shard path, token offset in it, tokens of shape (batch, block_size + 1))."""
     with open(SPIKE_JSON) as f:
         step = json.load(f)["step"]
-    with open(CONFIGS_JSON) as f:
-        cfg = json.load(f)[run]
+    cfg = run_config(run)
     world = cfg["world_size"]
     per_gpu = cfg["gradient_accumulation_steps"] // world  # grad accum is global; train.py divides it by world size
     loader = ShardedDataLoader(cfg["dataset"], "train", cfg["block_size"], cfg["batch_size"], rank=0,
