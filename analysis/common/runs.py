@@ -25,6 +25,22 @@ def fetch(paths, keys, config_keys, history_csv, config_json):
         json.dump(configs, f, indent=2)
 
 
+def fetch_configs(paths, config_keys, config_json):
+    """Only the named config values (plus world_size) for each run — no history download."""
+    import wandb
+    api = wandb.Api()
+    configs = {p: {**{k: (r := api.run(f"{WANDB_ENTITY}/{p}")).config[k] for k in config_keys},
+                   "world_size": r.metadata["gpu_count"]} for p in paths}
+    with open(config_json, "w") as f:
+        json.dump(configs, f, indent=2)
+
+
+def load_configs(paths, config_json):
+    with open(config_json) as f:
+        configs = json.load(f)
+    return {p: configs[p] for p in paths}
+
+
 def load(paths, history_csv, config_json):
     """({path: [row dict with float values]}, {path: config}) for the given runs; cached runs
     not in `paths` are skipped."""

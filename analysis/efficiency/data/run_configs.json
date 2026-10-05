@@ -1,0 +1,10 @@
+{
+  "curioslm-headline/fp1ka2zx": {
+    "out_dir": "out-ladder-fineweb_edu-a0-9.8B",
+    "world_size": 4
+  },
+  "curioslm-headline/2mtqioaa": {
+    "out_dir": "out-ladder-fineweb_edu-a4-9.8B",
+    "world_size": 4
+  }
+}

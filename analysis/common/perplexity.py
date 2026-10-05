@@ -46,8 +46,11 @@ def window_losses(model, tokens, device, batch_size=4, window=None):
 def doc_sums(tokens, losses, eot):
     """Per-document (summed loss, token count) for window_losses' output; documents are separated by `eot`."""
     tokens = np.asarray(tokens)
+    # tokens [EOT, a, b, EOT, c, d, e] ↔ losses [ℓa, ℓb, ℓEOT, ℓc, ℓd, ℓe]
+    # using eot as separator boolean makes cumsum the running count for the document ID of each scored token
     doc_of = np.cumsum(tokens[1:len(losses) + 1] == eot)  # scored token i+1 belongs to the doc opened by the last EOT
     n_docs = int(doc_of[-1]) + 1  # doc ids run 0..last
+    # e.g. doc_of [0,0,1,1,1,1]: summed loss per doc [ℓa+ℓb, ℓEOT+ℓc+ℓd+ℓe], scored tokens per doc [2, 4]
     return (np.bincount(doc_of, weights=losses, minlength=n_docs),  # summed loss per doc
             np.bincount(doc_of, minlength=n_docs))  # scored tokens per doc
 
@@ -62,6 +65,8 @@ def paired_bootstrap(sums_a, sums_b, counts, n_resamples, seed=0):
     rng = np.random.default_rng(seed)  # fixed seed: reproducible interval
     diffs = []
     for _ in range(n_resamples):
-        i = rng.integers(0, len(counts), len(counts))  # documents with replacement
+        # draw document numbers at random, with replacement, as many as we have documents
+        i = rng.integers(0, len(counts), len(counts))
         diffs.append(perplexity(sums_b[i], counts[i]) - perplexity(sums_a[i], counts[i]))  # same docs: paired
-    return np.percentile(diffs, [2.5, 97.5])  # middle 95% of the resampled differences
+    # sort the diffs and cut off the top and bottom 2.5%: the middle 95% is the confidence interval
+    return np.percentile(diffs, [2.5, 97.5])

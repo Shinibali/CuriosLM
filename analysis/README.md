@@ -27,3 +27,4 @@ uv sync --extra analysis --extra eval                         # scripts that sco
 |---|---|
 | [`step320_spike/`](step320_spike/) | A one-step loss spike shared by every run, traced to one "baby talk" page in the data |
 | [`headline_comparison/`](headline_comparison/) | Model A (GPT-2) vs Model B (Gemma-style) over the 9.8B-token headline runs |
+| [`efficiency/`](efficiency/) | Inference cost: generation speed with/without the KV cache, prefill, KV-cache memory |
