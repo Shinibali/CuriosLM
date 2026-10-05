@@ -3,7 +3,7 @@
 Interface under test (everything behind it is the implementer's choice):
     loader = MixedDataLoader({"fineweb_edu": 0.5, "cosmopedia_v2": 0.5}, "train", block_size, batch_size,
                              rank, world_size, device, device_type)
-    x, y = loader.next_batch()         # one whole micro-batch from one source, (batch_size, block_size) each
+    x, y = loader.next_batch()         # this rank's micro-batch, from one source, (batch_size, block_size) each
     loader.state_dict() / loader.load_state_dict(state)   # exact resume
 """
 import os
@@ -76,14 +76,30 @@ def test_each_source_reads_its_stream_in_order(two_sources):
         seen[name] += 1
 
 
-def test_every_rank_picks_the_same_source(two_sources):
-    """Under DDP all ranks must draw from the same source on each call (and read different windows of it)."""
-    r0 = make({"alpha": 0.5, "beta": 0.5}, rank=0, world_size=2)
-    r1 = make({"alpha": 0.5, "beta": 0.5}, rank=1, world_size=2)
-    for _ in range(50):
-        x0, x1 = r0.next_batch()[0], r1.next_batch()[0]
-        assert source_of(x0) == source_of(x1)
-        assert not np.array_equal(x0.numpy(), x1.numpy())
+@pytest.mark.parametrize("world_size", [1, 2, 4, 8])
+def test_every_optimizer_step_is_an_exact_mix_on_any_gpu_count(two_sources, world_size):
+    """A step is 8 global micro-batches (grad accum 8, split over the ranks); at 50:50 every step must hold exactly
+    4 of each, however many GPUs share it."""
+    ranks = [make({"alpha": 0.5, "beta": 0.5}, rank=r, world_size=world_size) for r in range(world_size)]
+    for step in range(10):
+        picks = [source_of(loader.next_batch()[0]) for _ in range(8 // world_size) for loader in ranks]
+        assert picks.count("alpha") == 4, f"step {step} on {world_size} GPUs: {picks}"
+
+
+@pytest.mark.parametrize("world_size", [2, 4])
+def test_ranks_read_each_stream_in_order_without_gaps_or_repeats(two_sources, world_size):
+    """Across all ranks, each source's micro-batches, taken in global order (call, then rank), are consecutive slices
+    of its stream: nothing skipped, nothing read twice."""
+    ranks = [make({"alpha": 0.5, "beta": 0.5}, rank=r, world_size=world_size) for r in range(world_size)]
+    seen = {name: 0 for name in STREAMS}
+    for _ in range(20):
+        for loader in ranks:
+            x, y = loader.next_batch()
+            name = source_of(x)
+            k = seen[name]
+            expected = two_sources[name][k * B * T:(k + 1) * B * T + 1].astype(np.int64)
+            assert np.array_equal(x.flatten().numpy(), expected[:-1]), f"{name} chunk {k} out of order"
+            seen[name] += 1
 
 
 def test_resume_is_exact(two_sources):
@@ -97,6 +113,13 @@ def test_resume_is_exact(two_sources):
     fresh.load_state_dict(state)
     for i, want in enumerate(expected):
         assert np.array_equal(fresh.next_batch()[0].numpy(), want.numpy()), f"batch {i} after resume differs"
+
+
+def test_resume_rejects_a_different_gpu_count(two_sources):
+    """A round reads world_size chunks, so resuming on another GPU count would change the data order: fail loudly."""
+    state = make({"alpha": 0.5, "beta": 0.5}, rank=0, world_size=2).state_dict()
+    with pytest.raises(AssertionError):
+        make({"alpha": 0.5, "beta": 0.5}, rank=0, world_size=4).load_state_dict(state)
 
 
 def test_resume_rejects_different_weights(two_sources):
