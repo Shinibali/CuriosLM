@@ -45,13 +45,13 @@ class RotaryEmbedding(nn.Module):
         first, second = torch.chunk(x, 2, dim=-1) # split into 2 chunks
         return torch.cat((-second, first), dim=-1)
 
-    def forward(self, q, k):
+    def forward(self, q, k, start=0):
 
-        B, nh, T, hs = q.size()
-        assert T <= self.rope_cosines.size(0), "Seq len should be smaller than block size"
+        B, nh, T, hs = q.size()        
+        assert start + T <= self.rope_cosines.size(0), "Seq len should be smaller than block size"
         
-        rope_cosines = self.rope_cosines[:T, :].to(dtype=q.dtype) # (T, hs), match q's dtype for compile
-        rope_sines = self.rope_sines[:T, :].to(dtype=q.dtype) # (T, hs)
+        rope_cosines = self.rope_cosines[start:start+T, :].to(dtype=q.dtype) # (T, hs), match q's dtype for compile
+        rope_sines = self.rope_sines[start:start+T, :].to(dtype=q.dtype) # (T, hs)
 
         # "GPT-NeoX style" pairing (x_i, x_{i+d/2}) rather than the paper's interleaved
         # (x_{2i-1}, x_{2i}). Same outcome, unless mixing weights with interleaved HF models.
@@ -75,12 +75,22 @@ def local_causal(q_idx, kv_idx, window):
     windowed = q_idx - window < kv_idx # at most window-1 positions back
     return causal & windowed
 
+class KVCache:
+    def __init__(self, n_layer):
+        self.k = [None] * n_layer # per layer (B, nkvh, T_stored, hs) or None
+        self.v = [None] * n_layer
+        self.pos = 0 # absolute pos of next token
+
+    def seq_lens(self):
+        return [0 if k is None else k.shape[2] for k in self.k]  # stored positions per layer (T axis; 0 if empty)
+    
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config, layer_idx):
         super().__init__()
         assert config.n_embd % config.n_head == 0
 
+        self.layer_idx = layer_idx
         self.is_global_layer = config.is_global_layer(layer_idx)
 
         if not self.is_global_layer:
@@ -122,9 +132,10 @@ class CausalSelfAttention(nn.Module):
                 None, None, T, T, device=device)
         return self._block_masks[key]
 
-    def forward(self, x):
+    def forward(self, x, kv_cache=None):
 
         B,T,C = x.size()
+        start = kv_cache.pos if kv_cache is not None else 0  # absolute position of the first new token
 
         q,k,v = self.c_attn(x).split([self.n_embd, self.kv_size, self.kv_size], dim=-1) # (B,T, ne), 2(B,T, kv_size)
 
@@ -133,18 +144,47 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.num_kv_heads, self.head_size).transpose(1, 2) # B, nkvh, T, hs
 
         if self.rope is not None:
-            q, k = self.rope(q,k) # rotated q, k for every (x_i, x_{i+d/2}) dimension pair
+            q, k = self.rope(q,k, start) # rotated q, k for every (x_i, x_{i+d/2}) dimension pair
+
+        if kv_cache is not None:
+            past_k = kv_cache.k[self.layer_idx]
+            if past_k is not None:
+                k = torch.cat([past_k, k], dim = 2) # dim T in (B, nkvh, T, hs)
+                v = torch.cat([kv_cache.v[self.layer_idx], v], dim = 2)  # dim T in (B, nkvh, T, hs)
+            kv_cache.k[self.layer_idx] = k
+            kv_cache.v[self.layer_idx] = v
 
         use_flex_attn = q.is_cuda and torch.compiler.is_compiling() and not (self.training and self.dropout > 0)
 
-        if self.is_global_layer:
-            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
-        else:
-            if use_flex_attn:
-                y = flex_attention(q,k,v, block_mask=self._flex_block_mask(T, q.device), enable_gqa=self.enable_gqa)
+        if kv_cache is not None:
+            # cached path (generation) T new queries attend to every stored key
+            T_stored  = k.shape[2]  # keys stored after the concat       
+            first_pos = (start + T) - T_stored  # absolute position of the OLDEST stored key 
+            k_pos = torch.arange(first_pos, start + T, device=x.device)  # positions of stored keys (T_stored,)
+            q_pos = torch.arange(start, start + T, device=x.device)  # absolute positions of the new queries (T,)
+
+            if self.is_global_layer:  
+                mask = k_pos.unsqueeze(0) <= q_pos.unsqueeze(1)  # causal mask (T, T_stored) may query see key? 
             else:
-                window_mask = self.window_mask[:T, :T] # (T, T), sliced down from the block_size buffer
-                y = F.scaled_dot_product_attention(q, k, v, attn_mask=window_mask, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
+                mask = local_causal(q_pos.unsqueeze(1), k_pos.unsqueeze(0), self.attention_window)  # causal + window
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, enable_gqa=self.enable_gqa) # B, nh, T, hs
+
+            if not self.is_global_layer: # drop keys no future queries can see
+            # the next query (position start + T) sees keys in (start + T − window, start + T]; one of those is its own,
+            # added when it arrives, so it needs at most window − 1 of the keys stored now
+                keep = self.attention_window - 1
+                kv_cache.k[self.layer_idx] = k[:,:,-keep:]
+                kv_cache.v[self.layer_idx] = v[:,:,-keep:]
+
+        elif self.is_global_layer: 
+            # no cache (training / eval) unchanged
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
+
+        elif use_flex_attn: # works only in cuda for both forward/backward. in mps, only forward works
+            y = flex_attention(q,k,v, block_mask=self._flex_block_mask(T, q.device), enable_gqa=self.enable_gqa)
+        else: # this is for local attention that works during training on mps for both forward and backward
+            window_mask = self.window_mask[:T, :T] # (T, T), sliced down from the block_size buffer
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=window_mask, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
 
         y = y.transpose(1, 2).contiguous().view(B,T,C)
 
@@ -205,13 +245,13 @@ class Block(nn.Module):
             self.ln_1 = nn.LayerNorm(config.n_embd, bias=config.bias)
             self.ln_2 = nn.LayerNorm(config.n_embd, bias=config.bias)
 
-    def forward(self, x):
+    def forward(self, x, kv_cache=None):
 
         if self.use_sandwich_norm:
-            x = x + self.ln_2(self.attn(self.ln_1(x)))
+            x = x + self.ln_2(self.attn(self.ln_1(x), kv_cache=kv_cache))
             x = x + self.ln_4(self.mlp(self.ln_3(x)))
         else:
-            x = x + self.attn(self.ln_1(x))
+            x = x + self.attn(self.ln_1(x), kv_cache=kv_cache)
             x = x + self.mlp(self.ln_2(x))
 
         return x
@@ -263,24 +303,31 @@ class GPT(nn.Module):
             if isinstance(module, nn.Linear) and module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
 
+    def new_kv_cache(self, batch_size, device):
+        return KVCache(self.config.n_layer)  # one slot per layer; batch_size/device unused while the cache grows by cat
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, kv_cache=None):
 
         device = idx.device
-        b, t = idx.size()
-        assert t <= self.config.block_size, f"input seq len {t} is larger than model context len {self.config.block_size}"
+        b, t = idx.size() # t is num of new tokens
+
+        start = kv_cache.pos if kv_cache is not None else 0 # pos of the first new
+        assert start + t <= self.config.block_size, \
+            f"input seq len {start + t} is larger than model context len {self.config.block_size}"
 
         token_emb = self.transformer.wte(idx) # b,t,ne
 
         if self.config.use_absolute_pos:
-            pos = torch.arange(0,t,dtype = torch.long, device=device) # (t)
+            pos = torch.arange(start,start+t,dtype = torch.long, device=device) # (t)
             pos_emb = self.transformer.wpe(pos) # t,ne
             x = self.transformer.drop(token_emb + pos_emb) # b,t,ne
         else:
             x = self.transformer.drop(token_emb) # b,t,ne
 
         for block in self.transformer.h:
-            x = block(x)
+            x = block(x, kv_cache=kv_cache)
+        if kv_cache is not None:
+            kv_cache.pos += t
         x = self.transformer.ln_f(x) # b,t,ne
 
         loss = None
@@ -396,14 +443,22 @@ class GPT(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, use_cache=True):
+
+        block = self.config.block_size
+        kv_cache, step_input = None, None
 
         for _ in range(max_new_tokens):
 
-            # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:] # (1,t)
+            if use_cache and idx.size(1) <= block: # cache as long as seq len is within context length
+                if kv_cache is None:  # first step: prefill the whole prompt once
+                    kv_cache = self.new_kv_cache(batch_size=idx.size(0), device=idx.device)
+                    step_input = idx
+                logits, _ = self(step_input, kv_cache=kv_cache) # only the new tokens after prefill
+            else:                
+                # no cache, or the sequence outgrew block_size: recompute on the last block_size tokens
+                logits, _ = self(idx[:, -block:]) # (1,1,vs)
 
-            logits, _ = self(idx_cond) # (1,1,vs)
             logits = logits[:,-1,:] / temperature # 1,vs
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1))) # 1,k
@@ -412,5 +467,6 @@ class GPT(nn.Module):
             probs = F.softmax(logits, dim=-1) # 1,vs
             idx_next = torch.multinomial(probs, num_samples=1) # 1,1
             idx = torch.cat((idx, idx_next), dim=1)
+            step_input = idx_next # the next cached step feeds only this one token
 
         return idx
