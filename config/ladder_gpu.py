@@ -5,13 +5,19 @@
 #   LADDER_RUNG=a2 LADDER_DATASET=cosmopedia_v2 uv run python train.py config/ladder_gpu.py --device=cuda
 #   LADDER_RUNG=a3 LADDER_SEED=1338 ...   # a second seed of a rung (the default seed is 1337)
 #   LADDER_RUNG=a4 LADDER_BUDGET=9.8B ... # the headline runs (default budget 1.5B)
+#   LADDER_MIX=fineweb_edu:0.5,cosmopedia_v2:0.5 ...  # train on a deterministic blend (first entry = val/loss set)
 #
-# A data-mixture study doesn't belong here: it varies a mixture ratio rather than an architecture
-# rung, and the loader reads only one dataset at a time today.
 
 import os
 
 dataset = os.environ.get('LADDER_DATASET', 'fineweb_edu')
+# LADDER_MIX turns one rung's run into a data-mix run; the blend's first dataset becomes `dataset`
+data_mix, mix_suffix = None, ''
+if 'LADDER_MIX' in os.environ:
+    data_mix = {name: float(w) for name, w in (item.split(':') for item in os.environ['LADDER_MIX'].split(','))}
+    dataset = next(iter(data_mix))
+    total = sum(data_mix.values())
+    mix_suffix = '-mix_' + '_'.join(f"{name.split('_')[0]}{round(100 * w / total)}" for name, w in data_mix.items())
 
 n_layer = 12
 n_head = 12
@@ -66,6 +72,6 @@ if 'LADDER_SEED' in os.environ:
     seed_suffix = f'-s{seed}'
 # dataset is always in the name: the same rung on two datasets must never share an out_dir,
 # or one silently overwrites the other's checkpoint
-out_dir = f'out-ladder-{dataset}-{rung}{budget_suffix}{seed_suffix}'
-wandb_run_name = f'ladder-{dataset}-{rung}{budget_suffix}{seed_suffix}'
+out_dir = f'out-ladder-{dataset}-{rung}{budget_suffix}{seed_suffix}{mix_suffix}'
+wandb_run_name = f'ladder-{dataset}-{rung}{budget_suffix}{seed_suffix}{mix_suffix}'
 globals().update(RUNGS[rung])  # e.g. KeyError: 'a9' if mistyped

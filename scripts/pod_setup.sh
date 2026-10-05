@@ -41,6 +41,9 @@ main() {
     # Before any torchrun: a slow download inside DDP can outlast the process group's barrier timeout.
     uv run --locked python -m curioslm.loaders.hf_shards download
     echo "shards: $(ls data/fineweb_edu/*.npy | wc -l) files"
+    # Data-mix runs also read Cosmopedia-v2; same repo naming as DataConfig.hf_dataset_repo_template.
+    uv run --locked python -c "from curioslm.config import DataConfig as D; from curioslm.loaders.hf_shards import download_shards; from curioslm.loaders.dataset import data_dir; download_shards(data_dir('cosmopedia_v2'), D().hf_dataset_repo_template.format('cosmopedia_v2'))"
+    echo "cosmopedia shards: $(ls data/cosmopedia_v2/*.npy | wc -l) files"
 
     # Uploads start failing at the private-storage cap (hit at ~99 GB on 2026-09-28): see it before a run.
     uv run --locked python -c "

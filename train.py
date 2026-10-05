@@ -12,6 +12,7 @@ from curioslm.loaders import dataset as data
 from curioslm.config import GPTConfig
 from curioslm.model import GPT
 from curioslm.loaders.shard_loader import ShardedDataLoader
+from curioslm.loaders.mixed_loader import MixedDataLoader
 from curioslm.loaders.hf_shards import download_shards
 
 #-------------------------------------------------------------------
@@ -22,7 +23,7 @@ from curioslm.loaders.hf_shards import download_shards
 # annotations only, no values — globals().update() is invisible to type checkers
 block_size: int; vocab_size: int; n_layer: int; n_head: int; n_embd: int
 n_kv_head: int | None; attention_window: int | None
-dropout: float; bias: bool; dataset: str; hf_dataset_repo_id: str
+dropout: float; bias: bool; dataset: str; hf_dataset_repo_id: str; data_mix: dict | None; hf_dataset_repo_template: str
 out_dir: str; init_from: str; eval_interval: int; log_interval: int; eval_iters: int
 eval_only: bool; always_save_checkpoint: bool; hf_checkpoint_repo_id: str
 wandb_log: bool; wandb_project: str; wandb_run_name: str
@@ -60,7 +61,9 @@ def get_lr(it):
 # config override
 #-------------------------------------------------------------------
 
-config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
+# None and dict too, or settings like data_mix / n_kv_head / attention_window go unlogged and unsaved
+config_keys = [k for k,v in globals().items()
+               if not k.startswith('_') and isinstance(v, (int, float, bool, str, dict, type(None)))]
 exec(open(runtime.package_path('configurator.py')).read()) # overrides from command line or config file
 config = {k: globals()[k] for k in config_keys} # will be useful for logging
 
@@ -137,18 +140,29 @@ if master_process:
 get_batch = data.make_get_batch(dataset, block_size, batch_size, device, device_type)
 train_loader = None
 eval_loaders = None
-if dataset == 'fineweb_edu':
+shard_datasets = list(data_mix) if data_mix else ([dataset] if data.is_sharded(dataset) else [])
+if shard_datasets:
+    if data_mix:
+        assert dataset == shard_datasets[0], "with data_mix, `dataset` must be the first entry (its val is val/loss)"
     # ddp_local_rank == 0, not master_process: every node needs its own local copy, and
     # master_process is true on only one process cluster-wide
     if ddp_local_rank == 0:
-        download_shards(data.data_dir(dataset), hf_dataset_repo_id)
+        for name in shard_datasets:
+            download_shards(data.data_dir(name), hf_dataset_repo_template.format(name))
     # other local ranks wait for rank 0's download instead of racing it
     if ddp:
         barrier()
 
-    # mechanism to not silently eat up trianing tokens
-    train_loader = ShardedDataLoader( dataset, "train", block_size, batch_size, ddp_rank, ddp_world_size, device, device_type)
-    eval_loaders = {split: ShardedDataLoader( dataset, split, block_size, batch_size, ddp_rank, ddp_world_size, device, device_type) for split in ["train", "val"]} 
+    loader_args = (block_size, batch_size, ddp_rank, ddp_world_size, device, device_type)
+    def stream(split):  # the training distribution: the blend if there is one, else `dataset` alone
+        if data_mix:
+            return MixedDataLoader(data_mix, split, *loader_args)
+        return ShardedDataLoader(dataset, split, *loader_args)
+    train_loader = stream("train")
+    # "train" = training distribution, "val" = `dataset`'s val (comparable across runs), plus each other blended
+    # dataset's own val, so a mixed run reports how it does on every source
+    eval_loaders = {"train": stream("train"), "val": ShardedDataLoader(dataset, "val", *loader_args)}
+    eval_loaders.update({f"val_{name}": ShardedDataLoader(name, "val", *loader_args) for name in shard_datasets[1:]})
 
     def get_batch(split):
         # this goes for training only, not evals
@@ -237,7 +251,7 @@ if ddp:
 def estimate_loss():
     out = {}
     model.eval()
-    for split in ['train', 'val']:
+    for split in (eval_loaders if eval_loaders is not None else ['train', 'val']):
         if eval_loaders is not None:
             eval_loaders[split].reset()
         losses = torch.zeros(eval_iters)
@@ -285,13 +299,15 @@ while True:
     final_iter = iter_num == max_iters
     if (iter_num % eval_interval == 0 or final_iter) and master_process:
         losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        extra = "".join(f", {split} loss {loss:.4f}" for split, loss in losses.items() if split not in ('train', 'val'))
+        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}{extra}")
         if wandb_log:
             wandb.log({
                 "tokens": iter_num * tokens_per_iter,
                 "iter": iter_num,
                 "train/loss": losses['train'], # mean over eval_iters batches: the precise numbers
                 "val/loss": losses['val'],
+                **{f"{split}/loss": loss for split, loss in losses.items() if split not in ('train', 'val')},
             })
         if losses['val'] < best_val_loss or always_save_checkpoint or final_iter:
             best_val_loss = losses['val'].item()
@@ -305,7 +321,8 @@ while True:
                 )
                 # get it off this pod's ephemeral disk immediately; async so a multi-GB
                 # upload never blocks the training loop
-                checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id, final=final_iter)
+                if hf_checkpoint_repo_id:  # empty disables staging (local smoke tests)
+                    checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id, final=final_iter)
     if iter_num == 0 and eval_only:
         break
     if final_iter: # every rank stops here, after exactly max_iters training steps
@@ -369,6 +386,8 @@ while True:
                 step_metrics["mfu"] = running_mfu * 100
             if peak_mem is not None:
                 step_metrics["peak_mem_gb"] = peak_mem
+            if data_mix:  # share of micro-batches each blended dataset has supplied so far (should match data_mix)
+                step_metrics.update({f"data/frac_{name}": f for name, f in train_loader.fractions().items()})
             wandb.log(step_metrics)
     iter_num += 1
     local_iter_num += 1

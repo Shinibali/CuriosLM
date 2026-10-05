@@ -70,6 +70,8 @@ class DataConfig:
     hf_dataset_repo_id: str = 'CuriosLM/fineweb_edu-shards' # private repo staging shards between
                                                             # prepare.py (local) and GPU training
     shard_size: int = 100_000_000 # tokens/shard -- NOT independent of world_size*batch_size*block_size
+    data_mix: dict | None = None # {dataset: weight}: train on a deterministic blend; None trains on `dataset` alone
+    hf_dataset_repo_template: str = 'CuriosLM/{}-shards' # shard repo for any dataset, by name
 
 
 @dataclass

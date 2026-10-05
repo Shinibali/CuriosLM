@@ -23,6 +23,11 @@ def encoder_decoder():
             lambda l: enc.decode(l))
 
 
+def is_sharded(name):
+    """True for datasets stored as prepare.py shards; False for the small single-file ones (train.bin/val.bin)."""
+    return not os.path.exists(os.path.join(data_dir(name), 'train.bin'))
+
+
 def make_get_batch(name, block_size, batch_size, device, device_type):
     """Build a get_batch(split) sampler. Settings are arguments rather than module globals, so
     one process can hold several samplers (different block sizes or datasets) at once."""
