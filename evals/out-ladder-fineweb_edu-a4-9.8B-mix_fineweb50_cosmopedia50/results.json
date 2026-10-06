@@ -1,0 +1,33 @@
+{
+  "model": "out-ladder-fineweb_edu-a4-9.8B-mix_fineweb50_cosmopedia50",
+  "limit": null,
+  "results": {
+    "hellaswag": {
+      "name": "hellaswag",
+      "alias": "hellaswag",
+      "sample_len": 10042,
+      "acc,none": 0.2953594901414061,
+      "acc_stderr,none": 0.004552718360513183,
+      "acc_norm,none": 0.3316072495518821,
+      "acc_norm_stderr,none": 0.004698285350019509
+    },
+    "arc_easy": {
+      "name": "arc_easy",
+      "alias": "arc_easy",
+      "sample_len": 2376,
+      "acc,none": 0.515993265993266,
+      "acc_stderr,none": 0.010254533589288175,
+      "acc_norm,none": 0.4781144781144781,
+      "acc_norm_stderr,none": 0.010249950427234132
+    },
+    "lambada_openai": {
+      "name": "lambada_openai",
+      "alias": "lambada_openai",
+      "sample_len": 5153,
+      "perplexity,none": 99.34475653606191,
+      "perplexity_stderr,none": 4.641926188807726,
+      "acc,none": 0.2685814088880264,
+      "acc_stderr,none": 0.006174944295391947
+    }
+  }
+}

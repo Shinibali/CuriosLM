@@ -1,0 +1,11 @@
+set,model,perplexity,docs
+fineweb_edu,Model B (100% FineWeb-Edu),21.798033279859837,1851
+fineweb_edu,"Model B, 50:50 mix",24.560903006153076,1851
+fineweb_edu,Model A (100% FineWeb-Edu),21.888168957473187,1851
+fineweb_edu,GPT-2 (OpenAI),26.404781217877748,1851
+fineweb_edu,"50:50 − 100% FW, 95% CI","[+2.639, +2.889]",
+cosmopedia_v2,Model B (100% FineWeb-Edu),20.490663580959765,2768
+cosmopedia_v2,"Model B, 50:50 mix",6.7596511891406035,2768
+cosmopedia_v2,Model A (100% FineWeb-Edu),20.308513999619645,2768
+cosmopedia_v2,GPT-2 (OpenAI),20.54489833515746,2768
+cosmopedia_v2,"50:50 − 100% FW, 95% CI","[-13.968, -13.495]",
