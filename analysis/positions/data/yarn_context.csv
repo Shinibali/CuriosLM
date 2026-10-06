@@ -1,0 +1,14 @@
+model,length,perplexity
+"Model A, learned positions",256,21.82105850915358
+"Model A, learned positions",512,20.864725331429263
+"Model A, learned positions",1024,20.67476707370649
+"Model B, plain RoPE",256,21.39389461998304
+"Model B, plain RoPE",512,20.567092960864574
+"Model B, plain RoPE",1024,20.629807061571544
+"Model B, plain RoPE",2048,23.18292294990225
+"Model B, plain RoPE",4096,37.74432209506785
+"Model B + YaRN, zero-shot",256,22.788363402953113
+"Model B + YaRN, zero-shot",512,22.01981626315336
+"Model B + YaRN, zero-shot",1024,22.413880098196522
+"Model B + YaRN, zero-shot",2048,22.92005127171727
+"Model B + YaRN, zero-shot",4096,23.159123826142952

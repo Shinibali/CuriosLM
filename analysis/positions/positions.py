@@ -16,12 +16,17 @@ CONFIG_JSON = os.path.join(DATA, "run_configs.json")
 
 # Choices: Model A has learned position embeddings; Model B has RoPE.
 LEARNED, ROPE = run_ids.HEADLINE_A, run_ids.HEADLINE_B
-# RoPE band speeds, by full turns within the training context, using YaRN's thresholds (Peng et al., 2023):
-# fast = at least YARN_BETA turns (YaRN leaves these alone), slow = fewer than YARN_ALPHA (YaRN rescales these fully),
-# middle = in between (YaRN blends these). Counted in turns, so the same numbers apply at any context length; which
-# bands they select depends on the context, the RoPE base and the head size. alpha = 1 is principled (never completes
-# a turn); beta = 32 is the paper's empirical choice for Llama models, a tunable hyperparameter rather than a law.
-YARN_ALPHA, YARN_BETA = 1, 32
+# RoPE band speeds, by full turns within the training context, using YaRN's thresholds (Peng et al., 2023), declared
+# once in model.py: fast = at least YARN_BETA turns (YaRN leaves these alone), slow = fewer than YARN_ALPHA (YaRN
+# rescales these fully), middle = in between (YaRN blends these). Counted in turns, so the same numbers apply at any
+# context length; which bands they select depends on the context, the RoPE base and the head size. alpha = 1 is
+# principled (never completes a turn); beta = 32 is the paper's empirical choice for Llama models, a tunable
+# hyperparameter rather than a law.
+from curioslm.model import YARN_ALPHA, YARN_BETA  # noqa: E402
+# Choice: stretch Model B's context 4×, 1,024 → 4,096. The YaRN paper's zero-shot results hold to about 2×, so
+# at 2× a fine-tune has little to add; 8× is past the zero-shot range for a 124M model, and only ~1% of validation
+# documents reach 8k tokens (~3% reach 4k). Zero-shot and fine-tuned YaRN are both measured at this factor.
+YARN_FACTOR = 4
 
 
 def speed_groups(wavelengths, context):
@@ -60,11 +65,13 @@ def model_args(out_dir):
     return checkpoints.load(path, map_location="cpu")["model_args"]
 
 
-def rope_frequencies(args):
+def rope_frequencies(args, yarn_factor=1.0):
     """Radians turned per position by each RoPE band, read from the model's own rotation table (the angle at
-    position 1), so they match what Model B actually used. Returns (frequencies, head size)."""
+    position 1), so they match what Model B actually used; with yarn_factor, the table YaRN builds from the training
+    length. Returns (frequencies, head size)."""
     import torch
     from curioslm.model import build_rope_cache
     head_size = args["n_embd"] // args["n_head"]
-    cos, sin = build_rope_cache(head_size, 2, args["rope_theta"])  # rows: positions 0 and 1
+    cos, sin = build_rope_cache(head_size, 2, args["rope_theta"], yarn_factor,
+                                args.get("block_size"))  # rows: positions 0 and 1; temperature cancels in atan2
     return torch.atan2(sin[1], cos[1]), head_size  # all below π, so atan2 recovers the angle exactly

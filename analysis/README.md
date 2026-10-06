@@ -29,5 +29,5 @@ uv sync --extra analysis --extra eval                         # scripts that sco
 | [`headline_comparison/`](headline_comparison/) | Model A (GPT-2) vs Model B (Gemma-style) over the 9.8B-token headline runs |
 | [`data_mix/`](data_mix/) | Model B on 100% FineWeb-Edu vs a 50:50 FineWeb-Edu : Cosmopedia-v2 blend: loss, benchmarks, perplexity, LAMBADA |
 | [`ladder/`](ladder/) | GPT-2 modernized one change at a time: each change's effect on loss, training speed and KV-cache size |
-| [`positions/`](positions/) | How each model represents position: RoPE's frequency bands, learned position embeddings as waves, loss across the context window |
+| [`positions/`](positions/) | How each model represents position: RoPE's frequency bands, learned position embeddings as waves, how Model B's heads use the bands, and stretching Model B's context 4× with YaRN |
 | [`efficiency/`](efficiency/) | Inference cost: generation speed with/without the KV cache, prefill, KV-cache memory |
