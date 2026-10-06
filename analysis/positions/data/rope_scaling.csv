@@ -1,0 +1,11 @@
+fact,value
+"bands slower than a 131,072-token context, base 10,000, head size 128 (64 bands)",0
+"bands slower than a 131,072-token context, base 500,000, head size 128 (64 bands)",15
+"bands slower than a 131,072-token context, base 1,000,000, head size 128 (64 bands)",17
+"Model B bands that first complete a turn between 1,024 and 2,048 tokens",3
+"Model B bands that first complete a turn between 1,024 and 4,096 tokens",5
+"Model B bands that first complete a turn between 1,024 and 8,192 tokens",7
+YaRN: Model B bands left alone (fast),6
+YaRN: Model B bands blended (middle),12
+YaRN: Model B bands fully rescaled (slow),14
+"learned position table for 131,072 positions at width 4,096 (millions of params)",536.870912
