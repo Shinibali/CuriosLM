@@ -14,13 +14,11 @@ import csv
 import os
 
 import numpy as np
-import tiktoken
 
 import headline  # this study's shared choices; also puts the repo root and analysis/ on sys.path
 from common import perplexity as ppl  # noqa: E402
 from curioslm.eval_adapter import default_device, load_model  # noqa: E402
 
-EOT = tiktoken.get_encoding("gpt2").eot_token  # the document separator prepare.py writes between documents
 
 
 def main():
@@ -44,7 +42,7 @@ def main():
         for label, out_dir in models.items():
             model = load_model(out_dir).eval().to(dev)  # downloads the checkpoint if missing
             blocks.add(model.config.block_size)
-            per_model[label] = ppl.doc_sums(tokens, ppl.window_losses(model, tokens, dev, args.batch_size), EOT)
+            per_model[label] = ppl.doc_sums(tokens, ppl.window_losses(model, tokens, dev, args.batch_size), ppl.EOT)
             sums, counts = per_model[label]
             value = ppl.perplexity(sums, counts)  # e^(mean loss per token) over the whole slice
             rows.append(dict(set=set_name, model=label, tokens=int(counts.sum()), docs=len(counts), perplexity=value))

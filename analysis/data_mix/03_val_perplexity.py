@@ -8,14 +8,12 @@ import argparse
 import csv
 import os
 
-import tiktoken
 
 import mix  # this study's shared choices; also puts the repo root and analysis/ on sys.path
 from common import models  # noqa: E402
 from common import perplexity as ppl  # noqa: E402
 from curioslm.eval_adapter import load_model  # noqa: E402
 
-EOT = tiktoken.get_encoding("gpt2").eot_token  # the document separator between documents in the shards
 OUT = os.path.join(mix.DATA, "val_perplexity.csv")
 
 
@@ -33,7 +31,7 @@ def main():
         sums = {}
         for label, out_dir in names.items():
             model = load_model(out_dir).eval().to(dev)
-            sums[label] = ppl.doc_sums(tokens, ppl.window_losses(model, tokens, dev, args.batch_size), EOT)
+            sums[label] = ppl.doc_sums(tokens, ppl.window_losses(model, tokens, dev, args.batch_size), ppl.EOT)
             value = ppl.perplexity(*sums[label])
             rows.append(dict(set=dataset, model=label, perplexity=value, docs=len(sums[label][1])))
             print(f"{dataset}, {label}: perplexity {value:.3f}")
