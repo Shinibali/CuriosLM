@@ -36,6 +36,7 @@ CONFIG_KEYS = tuple(f.name for f in fields(GPTConfig))
 # Architecture must match the checkpoint exactly or the weights won't load. dropout is excluded:
 # it owns no parameters and is legitimately changed when resuming.
 ARCH_KEYS = tuple(k for k in CONFIG_KEYS if k != 'dropout')
+CONTEXT_KEYS = ('block_size', 'yarn_factor', 'yarn_original_context')  # RoPE models: resize tables and masks, weights stay untouched
 
 _COMPILE_PREFIX = '_orig_mod.'
 
@@ -172,7 +173,11 @@ def build_model(checkpoint, overrides=None):
     saved = checkpoint['model_args']
     model_args = {k: saved[k] for k in CONFIG_KEYS if k in saved}
     for k, v in (overrides or {}).items():
-        if k in CONFIG_KEYS and k not in ARCH_KEYS:
+        if k in CONTEXT_KEYS:
+            assert model_args.get('position_encoding') == 'rope', \
+                f"can't override {k}: a learned position table has exactly block_size rows"
+            model_args[k] = v
+        elif k in CONFIG_KEYS and k not in ARCH_KEYS:
             model_args[k] = v
 
     model = GPT(GPTConfig(**model_args))

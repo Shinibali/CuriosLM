@@ -30,7 +30,9 @@ class GPTConfig:
 
     position_encoding: Literal["absolute", "rope"] = "absolute"
     rope_theta: float = 10000 # from paper Eq 15: https://arxiv.org/pdf/2104.09864
-
+    yarn_factor: float = 1.0 # YaRN context stretch s https://arxiv.org/abs/2309.00071; 1.0 = plain RoPE
+    yarn_original_context: int | None = None # the training length the stretch starts from; required when s != 1
+    
     n_kv_head: int | None = None # None = regular MHA (n_kv_head == n_head)
 
     mlp_type: Literal["gelu", "geglu"] = "gelu"

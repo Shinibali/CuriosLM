@@ -13,25 +13,44 @@ from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 from .config import GPTConfig
 
 
-def build_rope_cache(head_size, block_size, theta=10000):
+YARN_ALPHA, YARN_BETA = 1, 32  # YaRN band thresholds https://arxiv.org/abs/2309.00071
+
+def yarn_frequencies(inv_freq, factor, original_context):
+    # YaRN 'NTK-by-parts': fast bands kept, slow bands divided by the factor, a linear blend in between.
+
+    turns = original_context * inv_freq / (2 * math.pi)  # r = L / λ: full turns each band makes in original context
+    keep = ((turns - YARN_ALPHA) / (YARN_BETA - YARN_ALPHA)).clamp(0, 1)  # γ(r): 1 = fast, kept; 0 = slow, interpolated
+    return keep * inv_freq + (1 - keep) * inv_freq / factor  # h(θ) = γ·θ + (1 − γ)·θ/s
+
+def yarn_temperature(factor):
+    # √(1/t) from YaRN Eq. 22, applied to both q and k so q·k scales by 1/t jointly.
+    return 0.1 * math.log(factor) + 1  # 1.139 at s = 4
+
+    
+def build_rope_cache(head_size, block_size, theta=10000, yarn_factor=1.0, yarn_original_context=None):
     # RoPE Eq 15: https://arxiv.org/pdf/2104.09864 for rotating embedding dimension pair
     # theta_i = rope_theta ** (-2i / head_size)   for i = 0, 1, ..., head_size/2 - 1
 
     inv_freq = theta ** (-2.0 * torch.arange(head_size//2, dtype=torch.float32) / head_size) # (hs/2)
 
+    temperature = 1.0  # for YARN
+    if yarn_factor != 1.0:
+        inv_freq = yarn_frequencies(inv_freq, yarn_factor, yarn_original_context)  # (hs/2)
+        temperature = yarn_temperature(yarn_factor)
+                                    
     # Eq. 34, R = x * cos(m*theta) + x_mod * sin(m*theta), over (block_size, head_size//2) angles
     m = torch.arange(block_size, dtype=torch.float32) # (T)
 
     m_theta = torch.outer(m, inv_freq) # (T, hs/2)
 
-    return torch.cos(m_theta), torch.sin(m_theta) # (T, hs/2)
+    return temperature * torch.cos(m_theta), temperature * torch.sin(m_theta) # (T, hs/2)
 
 
 class RotaryEmbedding(nn.Module):
-    def __init__(self, head_size, block_size, theta):
+    def __init__(self, head_size, block_size, theta, yarn_factor=1.0, yarn_original_context=None):
         super().__init__()
 
-        cosines, sines = build_rope_cache(head_size, block_size, theta) # (T, hs/2)
+        cosines, sines = build_rope_cache(head_size, block_size, theta, yarn_factor, yarn_original_context) # (T, hs/2)
         full_cosines = torch.cat((cosines, cosines), dim=-1) # (T, hs)
         full_sines = torch.cat((sines, sines), dim=-1) # (T, hs)
 
@@ -100,7 +119,8 @@ class CausalSelfAttention(nn.Module):
             # idx.unsqueeze(1) reshapes idx from (block_size,) to (block_size, 1) -- q
             # idx.unsqueeze(0) reshapes to (1, block_size) -- k. Comparing them triggers broadcasting:
             self.attention_window = config.attention_window
-            self.register_buffer("window_mask", local_causal(idx.unsqueeze(1), idx.unsqueeze(0), config.attention_window), persistent=False)
+            self.register_buffer("window_mask", local_causal(idx.unsqueeze(1), idx.unsqueeze(0), 
+                                                             config.attention_window), persistent=False)
             self._block_masks = {}
 
         self.n_head = config.n_head
@@ -119,7 +139,8 @@ class CausalSelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
 
-        self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta) if config.use_rope else None 
+        self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta,
+                                    config.yarn_factor, config.yarn_original_context) if config.use_rope else None 
         
     def _flex_block_mask(self, T, device):
         key = (T, str(device))
@@ -262,6 +283,10 @@ class GPT(nn.Module):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
+        if config.yarn_factor != 1.0:
+            assert config.use_rope, " YARN rescales ROPE bands so this run needs ROPE inclusion"
+            assert config.yarn_original_context, "yarn_factor needs yarn_original_context training length"
+            
         self.config = config
 
         self.transformer = nn.ModuleDict(dict(
