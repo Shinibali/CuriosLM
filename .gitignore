@@ -34,3 +34,7 @@ docs-archive/
 # regenerable
 !evals/**/out-*/
 evals/**/samples_*.jsonl
+
+# blog draft and its scratch scripts/figures 
+Blog[0-9]*_*.md
+blog_scratch/
