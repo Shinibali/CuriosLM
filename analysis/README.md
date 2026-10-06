@@ -14,9 +14,9 @@ uv sync --extra analysis --extra eval                         # scripts that sco
   outputs from `data/`, never imports it.
 - **Shared code within a study** is an unnumbered module next to the scripts.
 - **Code shared across studies** goes in `common/`. Today: `models.py` (load a checkpoint, per-token losses, continuation
-  log-likelihoods through the eval adapter), `perplexity.py` (windowed losses — `window=` for context-length
-  studies, `reshape(-1, window)` for loss vs position — per-document sums, paired bootstrap), `runs.py` (wandb
-  cache), `run_ids.py`, `style.py`.
+  log-likelihoods through the eval adapter, the KV-cache size formula), `perplexity.py` (windowed losses — `window=` for context-length
+  studies, `reshape(-1, window)` for loss vs position — per-document sums, paired bootstrap), `evals.py` (evaluate.py results, paired McNemar and bootstrap comparisons, the LAMBADA target split), `runs.py` (wandb
+  cache), `run_ids.py`, `reference_models.py` (the model shapes the scaling scripts extrapolate to), `style.py`.
 - **No hardcoded facts:** wandb run paths are typed once, in `common/run_ids.py`; everything else about a run
   (out_dir, dataset, batch settings) is fetched from wandb. Real choices a study's scripts share live once in that
   study's module.
@@ -27,4 +27,7 @@ uv sync --extra analysis --extra eval                         # scripts that sco
 |---|---|
 | [`step320_spike/`](step320_spike/) | A one-step loss spike shared by every run, traced to one "baby talk" page in the data |
 | [`headline_comparison/`](headline_comparison/) | Model A (GPT-2) vs Model B (Gemma-style) over the 9.8B-token headline runs |
+| [`data_mix/`](data_mix/) | Model B on 100% FineWeb-Edu vs a 50:50 FineWeb-Edu : Cosmopedia-v2 blend: loss, benchmarks, perplexity, LAMBADA |
+| [`ladder/`](ladder/) | GPT-2 modernized one change at a time: each change's effect on loss, training speed and KV-cache size |
+| [`positions/`](positions/) | How each model represents position: RoPE's frequency bands, learned position embeddings as waves, loss across the context window |
 | [`efficiency/`](efficiency/) | Inference cost: generation speed with/without the KV cache, prefill, KV-cache memory |

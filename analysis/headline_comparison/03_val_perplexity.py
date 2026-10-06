@@ -49,11 +49,11 @@ def main():
             value = ppl.perplexity(sums, counts)  # e^(mean loss per token) over the whole slice
             rows.append(dict(set=set_name, model=label, tokens=int(counts.sum()), docs=len(counts), perplexity=value))
             saved[f"{set_name}_{label}_sums"], saved[f"{set_name}_{label}_counts"] = sums, counts
-            print(f"{set_name:14s} {label:5s} perplexity {value:8.3f}  ({counts.sum():,} tokens, {len(counts):,} docs)")
+            print(f"{set_name}, {label}: perplexity {value:.3f} ({counts.sum():,} tokens, {len(counts):,} docs)")
             del model  # free memory before the next one loads
         assert len(blocks) == 1, f"models use different block sizes {blocks}: windows wouldn't be comparable"
         lo, hi = ppl.paired_bootstrap(per_model["A"][0], per_model["B"][0], per_model["A"][1], headline.BOOTSTRAP)
-        print(f"{set_name:14s} B − A 95% CI [{lo:+.3f}, {hi:+.3f}]")
+        print(f"{set_name}, B − A: 95% CI [{lo:+.3f}, {hi:+.3f}]")
         rows.append(dict(set=set_name, model="B-A 95% CI", tokens="", docs="", perplexity=f"[{lo:+.3f}, {hi:+.3f}]"))
 
     os.makedirs(headline.DATA, exist_ok=True)

@@ -32,3 +32,4 @@ def run_config(run_path):
         sys.exit(f"{CONFIG_JSON} is missing: run 01_loss_overlay.py first")
     with open(CONFIG_JSON) as f:
         return json.load(f)[run_path]
+

@@ -6,3 +6,4 @@ LADDER_A4 = "curioslm-ladder/kpqh0522"          # 113M Gemma-style, 1.5B tokens
 LADDER_A4_SEED2 = "curioslm-ladder/ilwem9b9"    # same rung, seed 1338
 HEADLINE_A = "curioslm-headline/fp1ka2zx"       # Model A: 124M GPT-2, 9.8B tokens
 HEADLINE_B = "curioslm-headline/2mtqioaa"       # Model B: 113M Gemma-style, 9.8B tokens
+HEADLINE_MIX = "curioslm-headline/63d2jov1"     # Model B on 50:50 FineWeb-Edu : Cosmopedia-v2, 9.8B tokens

@@ -26,10 +26,11 @@ def fetch(paths, keys, config_keys, history_csv, config_json):
 
 
 def fetch_configs(paths, config_keys, config_json):
-    """Only the named config values (plus world_size) for each run — no history download."""
+    """Only the named config values (plus world_size) for each run — no history download. A key a run never logged
+    (e.g. data_mix, before train.py logged dict settings) comes back as None."""
     import wandb
     api = wandb.Api()
-    configs = {p: {**{k: (r := api.run(f"{WANDB_ENTITY}/{p}")).config[k] for k in config_keys},
+    configs = {p: {**{k: (r := api.run(f"{WANDB_ENTITY}/{p}")).config.get(k) for k in config_keys},
                    "world_size": r.metadata["gpu_count"]} for p in paths}
     with open(config_json, "w") as f:
         json.dump(configs, f, indent=2)
