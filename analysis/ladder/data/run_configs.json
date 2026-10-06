@@ -1,0 +1,26 @@
+{
+  "curioslm-ladder/mbwli7wj": {
+    "out_dir": "out-ladder-fineweb_edu-a0",
+    "world_size": 2
+  },
+  "curioslm-ladder/lhgvunew": {
+    "out_dir": "out-ladder-fineweb_edu-a1",
+    "world_size": 2
+  },
+  "curioslm-ladder/xeiqfnmn": {
+    "out_dir": "out-ladder-fineweb_edu-a2",
+    "world_size": 2
+  },
+  "curioslm-ladder/ljg1jqij": {
+    "out_dir": "out-ladder-fineweb_edu-a3",
+    "world_size": 2
+  },
+  "curioslm-ladder/kpqh0522": {
+    "out_dir": "out-ladder-fineweb_edu-a4",
+    "world_size": 2
+  },
+  "curioslm-ladder/ilwem9b9": {
+    "out_dir": "out-ladder-fineweb_edu-a4-s1338",
+    "world_size": 2
+  }
+}
