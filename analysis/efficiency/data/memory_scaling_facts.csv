@@ -1,0 +1,5 @@
+fact,value
+params whose bf16 + Adam state fits one GPU (billions),5.0
+"ridge point, bf16 FLOPs per byte, NVIDIA H100 80GB HBM3",295.2238805970149
+"decode attention intensity, FLOPs per byte (bf16), Model A",1.0
+"decode attention intensity, FLOPs per byte (bf16), Model B",4.0

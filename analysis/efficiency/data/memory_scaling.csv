@@ -1,0 +1,10 @@
+context,variant,kv_gb_per_sequence
+8192,"MHA, all global",4.294967296
+8192,"GQA, all global",1.073741824
+8192,GQA + Gemma 3 local windows,0.310272
+32768,"MHA, all global",17.179869184
+32768,"GQA, all global",4.294967296
+32768,GQA + Gemma 3 local windows,0.914251776
+131072,"MHA, all global",68.719476736
+131072,"GQA, all global",17.179869184
+131072,GQA + Gemma 3 local windows,3.33017088

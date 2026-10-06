@@ -1,0 +1,9 @@
+fact,value
+"embedding share of params, GPT-2 small (124M)",0.3126491646778043
+"embedding share of params, GPT-2 medium (350M)",0.1457174638487208
+"embedding share of params, GPT-2 large (774M)",0.08338637810311904
+"embedding share of params, GPT-2 XL (1.5B)",0.05175819834057685
+Chinchilla-optimal params for Model A's compute (millions),255.69376371464364
+Chinchilla-optimal tokens for Model A's compute (billions),5.113875274292872
+sequences per optimizer step (ours),480
+"sequences of 1,024 tokens per GPT-3 batch",3125.0
