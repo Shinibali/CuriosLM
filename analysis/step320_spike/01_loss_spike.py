@@ -27,6 +27,7 @@ RUNS = [
     ("113M Gemma-style, 1.5B-token run", run_ids.LADDER_A4),
     ("124M GPT-2, 9.8B-token run", run_ids.HEADLINE_A),
 ]
+COLORS = [style.MODEL_A, style.MODEL_B, style.MODEL_A_DARK]  # in RUNS order: the model's colour, darker for its long run
 CONFIG_KEYS = ["batch_size", "gradient_accumulation_steps", "block_size", "warmup_iters", "dataset", "out_dir"]
 HALF_WINDOW = 40e6  # display choice: tokens shown either side of the spike, enough flat curve to frame it
 
@@ -87,13 +88,13 @@ def main():
             transform=ax.get_xaxis_transform(), va="top", fontsize=9, color=style.INK_SECONDARY)
 
     ends = []
-    for (label, path), color in zip(RUNS, style.SERIES):
+    for (label, path), color in zip(RUNS, COLORS):
         pts = [(t / 1e6, loss) for _, t, loss in history[path] if window[0] <= t <= window[1]]
         x, y = zip(*pts)
         ax.plot(x, y, color=color, label=label, zorder=3)
         ends.append((x[-1], y[-1]))  # each line's last point anchors its direct label
     label_ys = style.spread_labels([e[1] for e in ends], min_gap=0.12)  # min_gap in loss units
-    for (label, _), (x_end, _), y_lab, color in zip(RUNS, ends, label_ys, style.SERIES):
+    for (label, _), (x_end, _), y_lab, color in zip(RUNS, ends, label_ys, COLORS):
         ax.plot([x_end + 1.2], [y_lab], marker="o", markersize=5, color=color, clip_on=False)
         ax.text(x_end + 2.6, y_lab, label, va="center", fontsize=9, color=style.INK, clip_on=False)
 

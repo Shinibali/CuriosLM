@@ -88,7 +88,7 @@ def main():
     sections = []
     for name, title in [("mangled", "As it appeared in the batch"), ("clean", "Un-mangled twin")]:
         view = models.colored_tokens_html(passages[name][0], passages[name][1], min_value=0, max_value=LOSS_MAX,
-                                          positive_color=style.SERIES[0])
+                                          positive_color=style.BAD)
         sections.append(f"<h3>{title}</h3>\n{view}")
     with open(HTML, "w") as f:
         f.write(f"<p>Per-token loss (nats) of a trained 113M Gemma-style model on the opening of the step-320 "
@@ -99,7 +99,7 @@ def main():
     rows = list({(c[0], m[0]): (c, m) for c, m in reversed(changed)}.values())[::-1]  # dedupe, keep first occurrence
     style.apply()
     fig, ax = plt.subplots(figsize=(6.5, 0.34 * len(rows) + 0.6))
-    clean_color, mangled_color = style.SERIES[0], style.SERIES[1]
+    clean_color, mangled_color = style.GOOD, style.BAD
     for row, (c, m) in enumerate(rows):
         ax.plot([c[1], m[1]], [row, row], color=style.GRID, linewidth=2.5, zorder=1, solid_capstyle="round")
         ax.scatter([c[1]], [row], s=48, color=clean_color, zorder=3, label="Real spelling" if row == 0 else None)
