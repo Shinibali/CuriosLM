@@ -4,8 +4,10 @@ KV-cache memory (measured, and from the formula, up to the full context).
 Standalone on purpose: eval timings mix in data loading and harness overhead. Every model runs on the same device
 and dtype; each timing has warm-up runs, synchronizes the GPU before reading the clock, and reports the median.
 
-    uv run --extra analysis python analysis/efficiency/01_inference_benchmark.py [--refresh] [--repeats 3]
-Writes data/inference.csv, data/kv_cache.csv, figures/inference_speed.png, figures/kv_cache.png.
+    uv run --extra analysis python analysis/efficiency/01_inference_benchmark.py [--refresh] [--repeats 3] [--tag h100]
+Writes data/inference.csv, data/kv_cache.csv, figures/inference_speed.png, figures/kv_cache.png. With --tag, the
+timing CSV and speed figure get that suffix (inference_h100.csv), so measurements from several machines sit side by
+side; KV-cache memory doesn't depend on the machine.
 """
 import argparse
 import csv
@@ -51,17 +53,6 @@ def median_seconds(fn, device, repeats, warmup):
     return statistics.median(times)
 
 
-def kv_bytes_formula(config, seq_len, batch, bytes_per_value):
-    """Bytes the cache holds after seq_len positions: per layer 2 (K and V) × batch × kv heads × head size ×
-    stored positions; local layers store at most attention_window − 1 positions."""
-    head_size = config.n_embd // config.n_head
-    total = 0
-    for layer in range(config.n_layer):
-        stored = seq_len if config.is_global_layer(layer) else min(seq_len, config.attention_window - 1)
-        total += stored
-    return total * 2 * batch * config.num_kv_heads * head_size * stored * bytes_per_value
-
-
 def kv_bytes_measured(cache):
     return sum(t.numel() * t.element_size() for t in cache.k + cache.v if t is not None)
 
@@ -92,7 +83,7 @@ def benchmark(label, model, device, repeats):
         cache = model.new_kv_cache(1, device)
         model(torch.randint(0, vocab, (1, t), device=device), kv_cache=cache)  # prefill t positions
         kv_rows.append(dict(model=label, seq_len=t, measured_mb=kv_bytes_measured(cache) / 1e6,
-                            formula_mb=kv_bytes_formula(config, t, 1, bytes_per_value) / 1e6))
+                            formula_mb=models.kv_bytes_formula(config, t, 1, bytes_per_value) / 1e6))
     return rows, kv_rows
 
 
@@ -112,7 +103,7 @@ def read_csv(path):
         return [{k: parse(v) for k, v in r.items()} for r in csv.DictReader(f)]
 
 
-def plot(rows, kv_rows):
+def plot(rows, kv_rows, suffix=""):
     style.apply()
     labels = [label for label, _ in RUNS]
     colors = dict(zip(labels, style.SERIES))
@@ -159,11 +150,13 @@ def plot(rows, kv_rows):
     left, right = axes[0].get_position().x0, axes[len(BATCHES) - 1].get_position().x1
     fig.legend(*axes[0].get_legend_handles_labels(), loc="lower center", bbox_to_anchor=((left + right) / 2, 0.0),
                ncol=4, fontsize=8.5, frameon=False)
-    fig.text(0.01, 0.99, "Inference speed: the KV cache speeds up generation; reading prompts is unchanged",
-             fontsize=12, fontweight="bold", va="top")
+    fig.text(0.01, 0.99, "Inference speed with and without the KV cache, and prefill", fontsize=12, fontweight="bold",
+             va="top")
     fig.text(0.01, 0.93, "Labels: speed-up from the cache for the same model.", fontsize=9,
              color=style.INK_SECONDARY, va="top")
-    fig.savefig(os.path.join(FIGURES, "inference_speed.png"), dpi=200)
+    fig.savefig(os.path.join(FIGURES, f"inference_speed{suffix}.png"), dpi=200)
+    if suffix:  # the KV-cache figure is the same on every machine
+        return
 
     # KV memory vs context: formula as a line, measurements as dots
     fig, ax = plt.subplots(figsize=(7, 4))
@@ -186,11 +179,13 @@ def main():
     parser.add_argument("--refresh", action="store_true", help="re-pull run configs from wandb")
     parser.add_argument("--repeats", type=int, default=3, help="timed runs per measurement (median is reported)")
     parser.add_argument("--plot-only", action="store_true", help="redraw the figures from the saved CSVs")
+    parser.add_argument("--tag", default="", help="machine label for the timing files, e.g. h100 → inference_h100.csv")
     args = parser.parse_args()
+    suffix = f"_{args.tag}" if args.tag else ""
     os.makedirs(DATA, exist_ok=True)
     os.makedirs(FIGURES, exist_ok=True)
     if args.plot_only:
-        plot(*(read_csv(os.path.join(DATA, n)) for n in ("inference.csv", "kv_cache.csv")))
+        plot(*(read_csv(os.path.join(DATA, n)) for n in (f"inference{suffix}.csv", "kv_cache.csv")), suffix)
         return
     paths = [p for _, p in RUNS]
     if args.refresh or not os.path.exists(CONFIG_JSON):
@@ -205,23 +200,23 @@ def main():
         rows += r
         kv_rows += k
         del model
-    for name, data in (("inference.csv", rows), ("kv_cache.csv", kv_rows)):
+    for name, data in ((f"inference{suffix}.csv", rows), ("kv_cache.csv", kv_rows)):
         with open(os.path.join(DATA, name), "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(data[0]))
             w.writeheader()
             w.writerows(data)
-    plot(rows, kv_rows)
+    plot(rows, kv_rows, suffix)
     print(f"device {device}")
     for r in rows:
         if r["phase"] == "decode":
-            print(f"{r['model'][:28]:28s} batch {r['batch']} prompt {r['tokens']:4d} cache {str(r['kv_cache']):5s} "
-                  f"{r['tokens_per_s']:7.1f} tok/s  {r['ms_per_token']:6.1f} ms/token")
+            print(f"{r['model']}, batch {r['batch']}, prompt {r['tokens']}, cache {r['kv_cache']}: "
+                  f"{r['tokens_per_s']:.1f} tok/s, {r['ms_per_token']:.1f} ms/token")
     for r in rows:
         if r["phase"] == "prefill":
-            print(f"{r['model'][:28]:28s} batch {r['batch']} prefill {r['tokens']:4d} {r['tokens_per_s']:9.0f} tok/s")
+            print(f"{r['model']}, batch {r['batch']}, prefill {r['tokens']}: {r['tokens_per_s']:.0f} tok/s")
     for label, _ in RUNS:
         last = [r for r in kv_rows if r["model"] == label][-1]
-        print(f"{label[:28]:28s} KV cache at {last['seq_len']} tokens: measured {last['measured_mb']:.2f} MB, "
+        print(f"{label}: KV cache at {last['seq_len']} tokens: measured {last['measured_mb']:.2f} MB, "
               f"formula {last['formula_mb']:.2f} MB")
 
 

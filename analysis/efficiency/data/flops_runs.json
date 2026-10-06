@@ -1,0 +1,24 @@
+{
+  "curioslm-headline/fp1ka2zx": {
+    "out_dir": "out-ladder-fineweb_edu-a0-9.8B",
+    "batch_size": 60,
+    "gradient_accumulation_steps": 8,
+    "block_size": 1024,
+    "max_iters": 20000,
+    "gpus": 4,
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "tokens_per_sec": 1822323.2784324677,
+    "logged_mfu": 39.409999551914694
+  },
+  "curioslm-headline/2mtqioaa": {
+    "out_dir": "out-ladder-fineweb_edu-a4-9.8B",
+    "batch_size": 60,
+    "gradient_accumulation_steps": 8,
+    "block_size": 1024,
+    "max_iters": 20000,
+    "gpus": 4,
+    "gpu": "NVIDIA H100 80GB HBM3",
+    "tokens_per_sec": 1755309.1798413587,
+    "logged_mfu": 35.12395326691337
+  }
+}
