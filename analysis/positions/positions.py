@@ -23,10 +23,11 @@ LEARNED, ROPE = run_ids.HEADLINE_A, run_ids.HEADLINE_B
 # principled (never completes a turn); beta = 32 is the paper's empirical choice for Llama models, a tunable
 # hyperparameter rather than a law.
 from curioslm.model import YARN_ALPHA, YARN_BETA  # noqa: E402
-# Choice: stretch Model B's context 4×, 1,024 → 4,096. The YaRN paper's zero-shot results hold to about 2×, so
-# at 2× a fine-tune has little to add; 8× is past the zero-shot range for a 124M model, and only ~1% of validation
-# documents reach 8k tokens (~3% reach 4k). Zero-shot and fine-tuned YaRN are both measured at this factor.
-YARN_FACTOR = 4
+# The YaRN study's choices (stretch factor, fine-tune length, snapshots), declared once in curioslm/config.py and
+# shared with the fine-tune's config: zero-shot and fine-tuned YaRN are measured at the same factor.
+from curioslm.config import YarnStudy  # noqa: E402
+YARN = YarnStudy()
+BOOTSTRAP = 10_000  # resamples for every bootstrap interval in this study
 
 
 def speed_groups(wavelengths, context):

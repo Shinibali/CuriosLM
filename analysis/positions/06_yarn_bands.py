@@ -24,9 +24,10 @@ OUT_PNG = os.path.join(positions.FIGURES, "yarn_bands.png")
 def main():
     model_args = positions.model_args(positions.out_dir(positions.ROPE))
     trained_context = model_args["block_size"]
-    target_context = positions.YARN_FACTOR * trained_context
+    target_context = int(positions.YARN.factor * trained_context)
     before = [2 * math.pi / freq for freq in positions.rope_frequencies(model_args)[0].tolist()]  # positions per turn
-    after = [2 * math.pi / freq for freq in positions.rope_frequencies(model_args, positions.YARN_FACTOR)[0].tolist()]
+    stretched = positions.rope_frequencies(model_args, positions.YARN.factor)[0].tolist()
+    after = [2 * math.pi / freq for freq in stretched]
     groups = positions.speed_groups(before, trained_context)  # YaRN's split, by turns within the training context
     group_of = {band: name for name, bands in groups.items() for band in bands}
 
@@ -47,7 +48,7 @@ def main():
     fig, ax = plt.subplots(figsize=(7.5, 4))
     labels = {"fast": f"fast: kept (≥ {positions.YARN_BETA} turns in {trained_context:,})",
               "middle": "middle: blended",
-              "slow": f"slow: stretched {positions.YARN_FACTOR}× (< {positions.YARN_ALPHA} turn)"}
+              "slow": f"slow: stretched {positions.YARN.factor:g}× (< {positions.YARN_ALPHA} turn)"}
     for (name, bands), color in zip(groups.items(), style.OTHER):  # same group colours as the real-heads figure
         for band in bands:
             ax.plot([band, band], [before[band], after[band]], color=color, linewidth=1, zorder=2)
@@ -63,7 +64,7 @@ def main():
     ax.set_ylabel("Wavelength (positions per turn)")
     ax.grid(axis="x", visible=False)
     ax.legend(loc="lower right", fontsize=8.5)
-    title = f"YaRN stretches Model B's slow bands {positions.YARN_FACTOR}× and leaves the fast ones alone"
+    title = f"YaRN stretches Model B's slow bands {positions.YARN.factor:g}× and leaves the fast ones alone"
     fig.text(0.02, 0.98, title, fontsize=12, fontweight="bold", va="top")
     fig.text(0.02, 0.92, "Hollow: as trained. Filled: with YaRN.", fontsize=9.5, color=style.INK_SECONDARY, va="top")
     fig.subplots_adjust(left=0.11, right=0.97, top=0.85, bottom=0.13)
