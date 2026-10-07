@@ -6,10 +6,9 @@ import torch
 
 from curioslm import checkpoints
 from curioslm.config import GPTConfig
-from curioslm.model import GPT
+from curioslm.model import GPT, YARN_ALPHA, YARN_BETA
 
-ORIGINAL_CONTEXT, FACTOR = 1024, 4.0  # Model B's training length; the 4× target decided for Part 2 §6
-ALPHA, BETA = 1, 32  # the paper's band thresholds, in turns within the original context (its Section 3.2)
+ORIGINAL_CONTEXT, FACTOR = 1024, 4.0  # test inputs: a training length and a stretch to check the mechanism at
 
 
 def tiny_config(**overrides):
@@ -49,7 +48,7 @@ def test_bands_follow_yarns_three_groups():
     plain = band_frequencies(tiny_config(yarn_factor=1.0))
     scaled = band_frequencies(tiny_config())
     turns = ORIGINAL_CONTEXT * plain / (2 * math.pi)  # full turns each band makes within the original context
-    fast, slow = turns >= BETA, turns < ALPHA
+    fast, slow = turns >= YARN_BETA, turns < YARN_ALPHA
     middle = ~fast & ~slow
     assert fast.any() and middle.any() and slow.any(), "test config should cover all three groups"
     torch.testing.assert_close(scaled[fast], plain[fast])

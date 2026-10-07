@@ -13,6 +13,7 @@ from curioslm.config import GPTConfig
 from curioslm.model import GPT
 from curioslm.loaders.shard_loader import ShardedDataLoader
 from curioslm.loaders.mixed_loader import MixedDataLoader
+from curioslm.loaders.long_page_loader import LongPageLoader
 from curioslm.loaders.hf_shards import download_shards
 
 #-------------------------------------------------------------------
@@ -22,10 +23,11 @@ from curioslm.loaders.hf_shards import download_shards
 
 # annotations only, no values — globals().update() is invisible to type checkers
 block_size: int; vocab_size: int; n_layer: int; n_head: int; n_embd: int
-n_kv_head: int | None; attention_window: int | None
+n_kv_head: int | None; attention_window: int | None; yarn_factor: int | None; yarn_original_context: int | None;
 dropout: float; bias: bool; dataset: str; hf_dataset_repo_id: str; data_mix: dict | None; hf_dataset_repo_template: str
-out_dir: str; init_from: str; eval_interval: int; log_interval: int; eval_iters: int
-eval_only: bool; always_save_checkpoint: bool; hf_checkpoint_repo_id: str
+long_pages: bool
+out_dir: str; init_from: str; extend_from: str; eval_interval: int; log_interval: int; eval_iters: int
+eval_only: bool; always_save_checkpoint: bool; snapshot_interval: int; hf_checkpoint_repo_id: str
 wandb_log: bool; wandb_project: str; wandb_run_name: str
 gradient_accumulation_steps: int; batch_size: int; learning_rate: float; max_iters: int
 weight_decay: float; beta1: float; beta2: float; grad_clip: float
@@ -83,6 +85,9 @@ assert warmup_iters < max_iters, f"warmup_iters={warmup_iters} >= max_iters={max
 # combinations that would otherwise be silently wrong rather than loud.
 assert n_kv_head is None or n_head % n_kv_head == 0, \
     f"n_head={n_head} not divisible by n_kv_head={n_kv_head}"
+assert init_from != 'extend' or (extend_from and extend_from != out_dir), \
+    "init_from='extend' needs extend_from (the run to continue) and a different out_dir, so its checkpoint is kept"
+assert not (long_pages and data_mix), "long_pages reads one dataset's pages; it doesn't blend"
 assert attention_window is None or attention_window <= block_size, \
     (f"attention_window={attention_window} > block_size={block_size}: every position falls inside "
      "the window, so local layers silently become full causal attention")
@@ -119,7 +124,7 @@ print(f"tokens per iteration will be: {tokens_per_iter:,}")
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
-    if init_from == 'scratch':
+    if init_from in ('scratch', 'extend'):  # both start a new run in out_dir
         checkpoints.check_no_overwrite(os.path.join(out_dir, 'ckpt.pt'), wandb_run_name)
 
 torch.manual_seed(seed + seed_offset)
@@ -157,11 +162,14 @@ if shard_datasets:
     def stream(split):  # the training distribution: the blend if there is one, else `dataset` alone
         if data_mix:
             return MixedDataLoader(data_mix, split, *loader_args)
+        if long_pages:  # one page per sequence: long-context fine-tuning
+            return LongPageLoader(dataset, split, *loader_args)
         return ShardedDataLoader(dataset, split, *loader_args)
     train_loader = stream("train")
     # "train" = training distribution, "val" = `dataset`'s val (comparable across runs), plus each other blended
-    # dataset's own val, so a mixed run reports how it does on every source
-    eval_loaders = {"train": stream("train"), "val": ShardedDataLoader(dataset, "val", *loader_args)}
+    # dataset's own val, so a mixed run reports how it does on every source. With long_pages, val is long pages too.
+    val_loader = LongPageLoader if long_pages else ShardedDataLoader
+    eval_loaders = {"train": stream("train"), "val": val_loader(dataset, "val", *loader_args)}
     eval_loaders.update({f"val_{name}": ShardedDataLoader(name, "val", *loader_args) for name in shard_datasets[1:]})
 
     def get_batch(split):
@@ -212,6 +220,33 @@ elif init_from == 'resume':
     if changed and master_process:
         print(f"WARNING: LR schedule differs from the checkpoint's (saved, now): {changed} -- the learning rate will jump")
 
+elif init_from == 'extend':
+    # Continue a finished run (weights, optimizer, step count) as a new run: a new out_dir and wandb run, and
+    # possibly a longer context (the YaRN fine-tune). The source run's checkpoint is only ever read.
+    ckpt_path = os.path.join(extend_from, 'ckpt.pt')
+    if not os.path.exists(ckpt_path):
+        if ddp_local_rank == 0:
+            checkpoints.download_checkpoint(extend_from, hf_checkpoint_repo_id)
+        if ddp:
+            barrier()
+    print(f"Extending {extend_from} into {out_dir}")
+    checkpoint = checkpoints.load(ckpt_path, map_location=device)
+
+    model, model_args = checkpoints.build_model(checkpoint, overrides={
+        'dropout': dropout, 'block_size': block_size,
+        'yarn_factor': yarn_factor, 'yarn_original_context': yarn_original_context})
+    iter_num = checkpoint['iter_num']  # step count and LR schedule continue from the extended run
+    # best_val_loss stays at its initial 1e9: the saved one is val loss on another dataset/context, not comparable
+    # train_loader_state is not restored: it's the extended run's position in its own stream (here: packed
+    # 1,024-token windows), meaningless to this run's loader, which starts from the first shard
+
+    # get_lr reads this run's schedule settings: say so if they differ from the run being extended
+    schedule_keys = ('learning_rate', 'min_lr', 'warmup_iters', 'lr_decay_iters', 'decay_lr')
+    changed = {k: (checkpoint['config'][k], globals()[k]) for k in schedule_keys
+               if k in checkpoint['config'] and checkpoint['config'][k] != globals()[k]}
+    if changed and master_process:
+        print(f"WARNING: LR schedule differs from {extend_from}'s (saved, now): {changed}")
+
 elif init_from.startswith('gpt2'):
     print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
     override_args = dict(dropout=dropout)
@@ -234,8 +269,9 @@ scaler = runtime.grad_scaler(device_type, dtype)
 # optimizer
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
 wandb_run_id = None
-if init_from == 'resume':
-    optimizer.load_state_dict(checkpoint['optimizer'])
+if init_from in ('resume', 'extend'):
+    optimizer.load_state_dict(checkpoint['optimizer'])  # AdamW moments are per parameter, independent of length
+if init_from == "resume":
     wandb_run_id = checkpoint['config'].get('wandb_run_id') # continue the same wandb run, not a new one
 checkpoint = None # free up memory
 
@@ -280,6 +316,7 @@ if wandb_log and master_process:
 #-------------------------------------------------------------------
 
 train_state = train_loader.state_dict() if train_loader is not None else None
+start_iter = iter_num # this run's first step: snapshots count from here
 X, Y = get_batch('train') # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0 # number of iterations in the lifetime of this process
@@ -323,6 +360,17 @@ while True:
                 # upload never blocks the training loop
                 if hf_checkpoint_repo_id:  # empty disables staging (local smoke tests)
                     checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id, final=final_iter)
+
+    # weights-only snapshots every snapshot_interval steps of this run, never overwritten (e.g. to measure how a
+    # fine-tune's effect grows with its length); written on top of, not instead of, the resumable ckpt.pt
+    if snapshot_interval and iter_num > start_iter and (iter_num - start_iter) % snapshot_interval == 0 \
+            and master_process:
+        snapshot = f'ckpt-{iter_num}.pt'
+        checkpoints.save(os.path.join(out_dir, snapshot), model=raw_model, optimizer=None, model_args=model_args,
+                         iter_num=iter_num, best_val_loss=best_val_loss, config=config)
+        print(f"saved snapshot {out_dir}/{snapshot}")
+        if hf_checkpoint_repo_id:
+            checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id, filename=snapshot)
     if iter_num == 0 and eval_only:
         break
     if final_iter: # every rank stops here, after exactly max_iters training steps

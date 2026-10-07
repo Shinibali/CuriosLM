@@ -74,17 +74,21 @@ class DataConfig:
     shard_size: int = 100_000_000 # tokens/shard -- NOT independent of world_size*batch_size*block_size
     data_mix: dict | None = None # {dataset: weight}: train on a deterministic blend; None trains on `dataset` alone
     hf_dataset_repo_template: str = 'CuriosLM/{}-shards' # shard repo for any dataset, by name
+    long_pages: bool = False # every sequence is one page of block_size+ tokens (its first block_size): long-context
+                             # fine-tuning, so no window joins short pages; see loaders/long_page_loader.py
 
 
 @dataclass
 class IOConfig:
     out_dir: str = 'out'
-    init_from: str = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
+    init_from: str = 'scratch' # 'scratch' or 'resume' or 'extend' or 'gpt2*'
+    extend_from: str = '' # init_from='extend': out_dir of the finished run to continue; this run writes to out_dir
     eval_interval: int = 2000
     log_interval: int = 1
     eval_iters: int = 200
     eval_only: bool = False # if True, exit right after the first eval
     always_save_checkpoint: bool = True # if True, save after every eval, not just on improvement
+    snapshot_interval: int = 0 # >0: also keep a weights-only ckpt-<iter>.pt every this many steps of this run
     wandb_log: bool = False
     wandb_project: str = 'owt'
     wandb_run_name: str = 'gpt2'
@@ -122,6 +126,16 @@ class RuntimeConfig:
     compile: bool = True # torch.compile: big win on CUDA, slow to warm up on MPS
     seed: int = 1337
     peak_flops_override: float = 0.0 # MFU denominator; 0 = look it up by device
+
+
+@dataclass(frozen=True)
+class YarnStudy:
+    """The YaRN context-extension study's choices, read by config/yarn_finetune.py and analysis/positions/."""
+    factor: float = 4.0 # stretch Model B's context 4x. The YaRN paper's zero-shot results hold to ~2x, so at 2x a
+                        # fine-tune has little to add; 8x is past zero-shot range for 124M, and only ~1% of val
+                        # pages reach 8k tokens (~3% reach 4k)
+    finetune_steps: int = 200 # 200 X 4096 T X 15 B X 8 grad_accum ~98M tokens, 1% of pretraining; no established budget, so snapshots measure it
+    snapshot_interval: int = 25 # steps between weights-only snapshots: 8 points on the effect-vs-steps curve
 
 
 @dataclass

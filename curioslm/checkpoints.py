@@ -52,10 +52,11 @@ def strip_compile_prefix(state_dict):
 
 def save(path, model, optimizer, model_args, iter_num, best_val_loss, config,  train_loader_state=None):
     """Write the checkpoint atomically: temp file then rename, so a crash mid-write can't
-    leave a truncated file where the only good checkpoint used to be."""
+    leave a truncated file where the only good checkpoint used to be. optimizer=None writes a
+    weights-only snapshot (for evaluation; it can't be resumed)."""
     torch.save({
         'model': model.state_dict(),
-        'optimizer': optimizer.state_dict(),
+        'optimizer': optimizer.state_dict() if optimizer is not None else None,
         'model_args': model_args,
         'iter_num': iter_num,
         'best_val_loss': best_val_loss,
@@ -83,15 +84,15 @@ def check_no_overwrite(path, wandb_run_name):
         )
 
 
-def upload_checkpoint(out_dir, repo_id, final=False):
-    """Push out_dir/ckpt.pt to the staging repo at a path mirroring out_dir, so the repo's file
-    listing itself says which run each checkpoint belongs to. Creates the repo on first use.
-    `final` also freezes a copy (see freeze_final)."""
+def upload_checkpoint(out_dir, repo_id, final=False, filename=CHECKPOINT_FILENAME):
+    """Push out_dir/<filename> (ckpt.pt unless a snapshot) to the staging repo at a path mirroring
+    out_dir, so the repo's file listing itself says which run each checkpoint belongs to. Creates
+    the repo on first use. `final` also freezes a copy (see freeze_final)."""
     api = HfApi()
     api.create_repo(repo_id, repo_type="model", private=True, exist_ok=True)
-    path_in_repo = f"{out_dir}/{CHECKPOINT_FILENAME}"
+    path_in_repo = f"{out_dir}/{filename}"
     api.upload_file(
-        path_or_fileobj=os.path.join(out_dir, CHECKPOINT_FILENAME),
+        path_or_fileobj=os.path.join(out_dir, filename),
         path_in_repo=path_in_repo,
         repo_id=repo_id,
         repo_type="model",
@@ -141,11 +142,11 @@ def stale_orphans(lfs_files, current_oids, older_than):
     return [f for f in lfs_files if f.file_oid not in current_oids and f.pushed_at < older_than]
 
 
-def upload_checkpoint_async(out_dir, repo_id, final=False):
+def upload_checkpoint_async(out_dir, repo_id, final=False, filename=CHECKPOINT_FILENAME):
     """Non-blocking upload_checkpoint: returns a Future immediately so the training loop never
     stalls on the transfer. concurrent.futures' atexit hook joins the pool, so a run's final
     upload still finishes even though nothing here waits on it."""
-    future = _upload_pool.submit(upload_checkpoint, out_dir, repo_id, final)
+    future = _upload_pool.submit(upload_checkpoint, out_dir, repo_id, final, filename)
     future.add_done_callback(_report_upload_failure)
     return future
 
@@ -156,12 +157,12 @@ def _report_upload_failure(future):
         print(f"checkpoint upload FAILED: {future.exception()!r}", flush=True)
 
 
-def download_checkpoint(out_dir, repo_id):
-    """Pull <out_dir>/ckpt.pt from the staging repo into out_dir, to resume on a node that
+def download_checkpoint(out_dir, repo_id, filename=CHECKPOINT_FILENAME):
+    """Pull <out_dir>/<filename> from the staging repo into out_dir, to resume on a node that
     doesn't have it locally. local_dir='.' plus an out_dir-prefixed filename lands it at the
     same relative path it was uploaded from."""
     os.makedirs(out_dir, exist_ok=True)
-    path_in_repo = f"{out_dir}/{CHECKPOINT_FILENAME}"
+    path_in_repo = f"{out_dir}/{filename}"
     hf_hub_download(repo_id=repo_id, filename=path_in_repo, repo_type="model", local_dir=".")
     print(f"downloaded checkpoint from {repo_id}:{path_in_repo}")
 

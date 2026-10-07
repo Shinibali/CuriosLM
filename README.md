@@ -69,6 +69,17 @@ the seed (when set), so runs never collide. `a0`'s entry is empty on purpose —
 are the vanilla baseline. Batch settings are calibrated for H100s (micro-batch 60) and gradient accumulation is
 global — `train.py` divides it by the GPU count — so every step is 491,520 tokens on 1, 2, 4 or 8 GPUs.
 
+**The YaRN fine-tune (Model B, 1,024 → 4,096 tokens):**
+```bash
+uv run python train.py config/yarn_finetune.py --device=cuda
+```
+Continues the 9.8B a4 run (`init_from='extend'`, `extend_from=` its `out_dir`) with every headline setting
+unchanged (the config execs `ladder_gpu.py`) except: `block_size` 4,096 with `yarn_factor` 4 from
+`yarn_original_context` 1,024, micro-batch 15 so a step is still 491,520 tokens, `long_pages=True` (each sequence is
+one FineWeb-Edu page of 4,096+ tokens; `curioslm/loaders/long_page_loader.py`), 200 more steps at the schedule's
+`min_lr`, and `snapshot_interval=25` (weights-only `ckpt-<iter>.pt` copies, never overwritten). Writes to
+`<headline out_dir>-yarn4x` as a new wandb run in `curioslm-yarn`; the headline checkpoint is only read.
+
 ## Sample
 
 ```bash
@@ -116,8 +127,9 @@ never blocks on the transfer. The remote path mirrors `out_dir` (e.g.
 `out-ladder-fineweb_edu-a2/ckpt.pt`), so the repo listing itself says which run each checkpoint
 came from. Each upload then prunes the repo — squashes its history and permanently deletes replaced versions older
 than 10 minutes — since an overwritten file otherwise keeps every old version and counts it against the
-private-storage quota; the repo holds roughly one checkpoint per run. `init_from='resume'` pulls from there when the checkpoint isn't on the local disk;
-`init_from='scratch'` refuses to start if `out_dir` already holds a *different* run's checkpoint
+private-storage quota; the repo holds roughly one checkpoint per run. `init_from='resume'` pulls from there when the checkpoint isn't on the local disk,
+as does `init_from='extend'` for the run it continues; snapshots (`snapshot_interval`) are uploaded beside `ckpt.pt`.
+`init_from='scratch'` and `'extend'` refuse to start if `out_dir` already holds a *different* run's checkpoint
 (compared by `wandb_run_name`), so an `out_dir` collision fails loudly rather than silently
 overwriting. Separate from the polished, public model repos, which get pushed by hand with a
 model card when a headline model is finalized.
