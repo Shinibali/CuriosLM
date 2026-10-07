@@ -6,9 +6,13 @@ GPT-2 BPE-encoded (tiktoken).
 import os
 
 import numpy as np
+import tiktoken
 import torch
 
 from .. import runtime
+
+
+EOT = tiktoken.get_encoding('gpt2').eot_token  # GPT-2's <|endoftext|>: data/sharding.py writes it before every document
 
 
 def data_dir(name):

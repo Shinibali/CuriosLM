@@ -5,16 +5,14 @@ import os
 import sys
 
 import numpy as np
-import tiktoken
 import torch
 import torch.nn.functional as F
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+from curioslm.loaders.dataset import EOT  # noqa: E402,F401 -- the document separator, declared once
 from curioslm.loaders.shard_loader import ShardedDataLoader  # noqa: E402
-
-EOT = tiktoken.get_encoding("gpt2").eot_token  # the separator data/sharding.py writes before every document
 
 
 def val_tokens(dataset, n_tokens):
