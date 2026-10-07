@@ -42,6 +42,7 @@ from curioslm.loaders.long_page_loader import LongPageLoader  # noqa: E402
 OUT_NPZ = os.path.join(positions.DATA, "yarn_context.npz")
 OUT_CSV = os.path.join(positions.DATA, "yarn_context.csv")
 OUT_PNG = os.path.join(positions.FIGURES, "yarn_context.png")
+OUT_STEPS_PNG = os.path.join(positions.FIGURES, "yarn_finetune_steps.png")
 DOCS = 500  # held-out pages scored: enough for a paired 95% interval of about ±0.5 perplexity at the target
 SHORTEST_SHARE = 4  # the shortest reported prefix is 1/4 of the training length; lengths double up to the target
 FIRST_PLOTTED = 16  # curves start here: averages over a handful of tokens are noise
@@ -67,7 +68,8 @@ def model_keys(data):
 
 def colors(keys):
     finetuned = [key for key in keys if key.startswith(FINETUNED)]
-    shades = {key: FINETUNE_RAMP(share) for key, share in zip(finetuned, np.linspace(0, 1, len(finetuned)))}
+    shares = np.linspace(0, 1, len(finetuned)) if len(finetuned) > 1 else [0.5]  # one snapshot: the ramp's middle
+    shades = {key: FINETUNE_RAMP(share) for key, share in zip(finetuned, shares)}
     return {key: COLORS.get(key, shades.get(key)) for key in keys}
 
 
@@ -101,6 +103,11 @@ def load(path, device, **overrides):
     return model.eval().to(device), model_args, checkpoint["iter_num"]
 
 
+def snapshot_step(path):
+    """The training step a ckpt-<iter>.pt snapshot was taken at, from its name."""
+    return int(os.path.basename(path)[len("ckpt-"):-len(".pt")])
+
+
 def checkpoint_path(out_dir):
     """A headline run's ckpt.pt, downloaded from the staging repo first if it isn't on disk."""
     positions.model_args(out_dir)
@@ -127,7 +134,18 @@ def prefix_perplexity(page_prefix, lengths):
             if column < page_prefix.shape[1]}
 
 
-def evaluate(num_docs, finetuned):
+def saved_summary(num_docs, trained, target):
+    """Results already in OUT_NPZ, if they were scored on the same pages (same count, same lengths): the pages are
+    the first num_docs of the validation shard, so those results can be reused instead of scored again."""
+    if not os.path.exists(OUT_NPZ):
+        return {}
+    saved = dict(np.load(OUT_NPZ))
+    if (int(saved["num_docs"]), int(saved["trained"]), int(saved["target"])) != (num_docs, trained, target):
+        return {}
+    return {key: value for key, value in saved.items() if key.endswith(("_position", "_pages"))}
+
+
+def evaluate(num_docs, finetuned, rescore):
     device = models.device()
     trained = positions.model_args(positions.out_dir(positions.ROPE))["block_size"]
     target = int(positions.YARN.factor * trained)
@@ -140,17 +158,20 @@ def evaluate(num_docs, finetuned):
     if finetuned:  # snapshots record their own YaRN settings
         snapshots = glob.glob(os.path.join(positions.ROOT, finetuned, "ckpt-*.pt"))
         assert snapshots, f"no ckpt-<iter>.pt snapshots in {finetuned}: copy them from the pod or the staging repo"
-        runs += [(FINETUNED, path, {}) for path in sorted(snapshots, key=lambda path: int(path[:-3].split("-")[-1]))]
-    lengths, summary = report_lengths(trained, target), {}
+        headline_step = checkpoints.load(checkpoint_path(rope_dir), map_location="cpu")["iter_num"]  # steps from here
+        runs += [(f"{FINETUNED}{snapshot_step(path) - headline_step}", path, {})
+                 for path in sorted(snapshots, key=snapshot_step)]
+    lengths = report_lengths(trained, target)
+    summary = {} if rescore else saved_summary(num_docs, trained, target)
     for key, path, overrides in runs:
-        model, model_args, step = load(path, device, **overrides)
-        if key == "B":
-            headline_step = step  # fine-tuning steps are counted from here
-        if key == FINETUNED:
+        if f"{key}_position" in summary:
+            print(f"{label(key)}: reusing saved results for these {num_docs} pages")
+            continue
+        model, model_args, _ = load(path, device, **overrides)
+        if key.startswith(FINETUNED):
             assert (model_args.get("yarn_factor"), model_args.get("yarn_original_context"),
                     model_args["block_size"]) == (positions.YARN.factor, trained, target), \
                 f"fine-tuned run's YaRN settings {model_args} differ from the zero-shot ones"
-            key = f"{FINETUNED}{step - headline_step}"
         losses = position_losses(model, windows, device)
         summary[f"{key}_position"], summary[f"{key}_pages"] = summarize(losses, lengths)
         print(f"{label(key)}: scored {num_docs} pages × {losses.shape[1]:,} positions")
@@ -189,6 +210,9 @@ def report(data):
 
 
 def plot(data, keys, lengths):
+    """The context figure: every model, but of the fine-tune only its last snapshot (the steps get their own)."""
+    finetuned = [key for key in keys if key.startswith(FINETUNED)]
+    keys = [key for key in keys if not key.startswith(FINETUNED)] + finetuned[-1:]
     trained, target = int(data["trained"]), int(data["target"])
     num_docs = int(data["num_docs"])
     style.apply()
@@ -231,17 +255,52 @@ def plot(data, keys, lengths):
     os.makedirs(positions.FIGURES, exist_ok=True)
     fig.savefig(OUT_PNG, dpi=200)
     print(f"wrote {OUT_CSV}, {OUT_PNG}")
+    if finetuned:
+        plot_steps(data, finetuned, lengths)
+
+
+def plot_steps(data, finetuned, lengths):
+    """Perplexity at the target and at the training length against fine-tuning steps (0 = zero-shot YaRN), with the
+    model as trained at its training length for reference."""
+    trained, target = int(data["trained"]), int(data["target"])
+    trained_column = lengths.index(trained)
+    steps = [0] + [int(key[len(FINETUNED):]) for key in finetuned]
+    curve_keys = ["B_yarn"] + finetuned
+    at_target = [math.exp(data[f"{key}_pages"][:, -1].mean()) for key in curve_keys]
+    at_trained = [math.exp(data[f"{key}_pages"][:, trained_column].mean()) for key in curve_keys]
+    reference = math.exp(data["B_pages"][:, trained_column].mean())  # Model B as trained, at its training length
+    first_share = (at_target[0] - at_target[1]) / (at_target[0] - at_target[-1])  # gain by the first snapshot
+    style.apply()
+    fig, ax = plt.subplots(figsize=(7.5, 4))
+    ax.plot(steps, at_target, color=style.ACCENT, marker="o", label=f"whole page ({target:,} tokens)")
+    ax.plot(steps, at_trained, color=style.OTHER[2], marker="o",
+            label=f"first {trained:,} tokens (the original training length)")
+    ax.axhline(reference, color=style.INK, linewidth=1, linestyle="--", zorder=1)
+    ax.text(steps[-1], reference, f"Model B before YaRN, first {trained:,} tokens", fontsize=8.5, ha="right",
+            va="bottom", color=style.INK)
+    ax.set_xticks(steps, ["zero-shot"] + [str(step) for step in steps[1:]])
+    ax.set_xlabel("Fine-tuning steps")
+    ax.set_ylabel("Perplexity")
+    ax.legend(loc="upper right", fontsize=8.5)
+    fig.text(0.02, 0.98, f"{first_share:.0%} of the fine-tune's gain at {target:,} tokens comes in its first "
+             f"{steps[1]} steps", fontsize=12, fontweight="bold", va="top")
+    fig.text(0.02, 0.92, f"Model B + YaRN, {int(data['num_docs'])} held-out pages.", fontsize=9.5,
+             color=style.INK_SECONDARY, va="top")
+    fig.subplots_adjust(left=0.1, right=0.97, top=0.84, bottom=0.13)
+    fig.savefig(OUT_STEPS_PNG, dpi=200)
+    print(f"wrote {OUT_STEPS_PNG}")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--docs", type=int, default=DOCS, help="held-out pages scored (each at least the target long)")
     parser.add_argument("--finetuned", help="out_dir of the YaRN fine-tune run; every ckpt-<iter>.pt in it is scored")
+    parser.add_argument("--rescore", action="store_true", help="score every model again, ignoring saved results")
     parser.add_argument("--plot-only", action="store_true")
     args = parser.parse_args()
     if not args.plot_only:
         os.makedirs(positions.DATA, exist_ok=True)
-        evaluate(args.docs, args.finetuned)
+        evaluate(args.docs, args.finetuned, args.rescore)
     data = dict(np.load(OUT_NPZ))
     plot(data, *report(data))
 

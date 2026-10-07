@@ -12,3 +12,43 @@ model,length,perplexity
 "Model B + YaRN, zero-shot",1024,22.413880098196522
 "Model B + YaRN, zero-shot",2048,22.92005127171727
 "Model B + YaRN, zero-shot",4096,23.159123826142952
+"Model B + YaRN, fine-tuned 25 steps",256,21.54971963137668
+"Model B + YaRN, fine-tuned 25 steps",512,20.80541380735766
+"Model B + YaRN, fine-tuned 25 steps",1024,20.891261454656096
+"Model B + YaRN, fine-tuned 25 steps",2048,21.288681868473752
+"Model B + YaRN, fine-tuned 25 steps",4096,21.480859339059474
+"Model B + YaRN, fine-tuned 50 steps",256,21.30195874606767
+"Model B + YaRN, fine-tuned 50 steps",512,20.58571536517083
+"Model B + YaRN, fine-tuned 50 steps",1024,20.68091476052979
+"Model B + YaRN, fine-tuned 50 steps",2048,21.068144398706416
+"Model B + YaRN, fine-tuned 50 steps",4096,21.25613146694002
+"Model B + YaRN, fine-tuned 75 steps",256,21.241601822173667
+"Model B + YaRN, fine-tuned 75 steps",512,20.52597838825038
+"Model B + YaRN, fine-tuned 75 steps",1024,20.615022344403734
+"Model B + YaRN, fine-tuned 75 steps",2048,20.993974498544077
+"Model B + YaRN, fine-tuned 75 steps",4096,21.17224197242037
+"Model B + YaRN, fine-tuned 100 steps",256,21.198299883086097
+"Model B + YaRN, fine-tuned 100 steps",512,20.483539464248565
+"Model B + YaRN, fine-tuned 100 steps",1024,20.566028912163713
+"Model B + YaRN, fine-tuned 100 steps",2048,20.936526713535937
+"Model B + YaRN, fine-tuned 100 steps",4096,21.11093383798626
+"Model B + YaRN, fine-tuned 125 steps",256,21.145253159942513
+"Model B + YaRN, fine-tuned 125 steps",512,20.437757588089426
+"Model B + YaRN, fine-tuned 125 steps",1024,20.525645614274993
+"Model B + YaRN, fine-tuned 125 steps",2048,20.890937700948083
+"Model B + YaRN, fine-tuned 125 steps",4096,21.061118341698222
+"Model B + YaRN, fine-tuned 150 steps",256,21.11082814023503
+"Model B + YaRN, fine-tuned 150 steps",512,20.412381500970834
+"Model B + YaRN, fine-tuned 150 steps",1024,20.492463847992298
+"Model B + YaRN, fine-tuned 150 steps",2048,20.85815002825991
+"Model B + YaRN, fine-tuned 150 steps",4096,21.027221327875637
+"Model B + YaRN, fine-tuned 175 steps",256,21.107179375699502
+"Model B + YaRN, fine-tuned 175 steps",512,20.417672279632935
+"Model B + YaRN, fine-tuned 175 steps",1024,20.48756887702749
+"Model B + YaRN, fine-tuned 175 steps",2048,20.84025004658879
+"Model B + YaRN, fine-tuned 175 steps",4096,21.002540405546103
+"Model B + YaRN, fine-tuned 200 steps",256,21.084359976417115
+"Model B + YaRN, fine-tuned 200 steps",512,20.391582134330648
+"Model B + YaRN, fine-tuned 200 steps",1024,20.462116307178604
+"Model B + YaRN, fine-tuned 200 steps",2048,20.81531215362998
+"Model B + YaRN, fine-tuned 200 steps",4096,20.977373302643407
