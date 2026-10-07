@@ -88,6 +88,8 @@ class IOConfig:
     eval_iters: int = 200
     eval_only: bool = False # if True, exit right after the first eval
     always_save_checkpoint: bool = True # if True, save after every eval, not just on improvement
+    checkpoint_interval: int = 0 # >0: write the resumable ckpt.pt only every this many steps of this run (and at
+                                 # the end); 0 = at every eval, as the pretraining runs do
     snapshot_interval: int = 0 # >0: also keep a weights-only ckpt-<iter>.pt every this many steps of this run
     wandb_log: bool = False
     wandb_project: str = 'owt'

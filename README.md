@@ -77,8 +77,10 @@ Continues the 9.8B a4 run (`init_from='extend'`, `extend_from=` its `out_dir`) w
 unchanged (the config execs `ladder_gpu.py`) except: `block_size` 4,096 with `yarn_factor` 4 from
 `yarn_original_context` 1,024, micro-batch 15 so a step is still 491,520 tokens, `long_pages=True` (each sequence is
 one FineWeb-Edu page of 4,096+ tokens; `curioslm/loaders/long_page_loader.py`), 200 more steps at the schedule's
-`min_lr`, and `snapshot_interval=25` (weights-only `ckpt-<iter>.pt` copies, never overwritten). Writes to
-`<headline out_dir>-yarn4x` as a new wandb run in `curioslm-yarn`; the headline checkpoint is only read.
+`min_lr`, and `snapshot_interval=25` (weights-only `ckpt-<iter>.pt` copies, never overwritten). In-run evals happen
+at the snapshot steps on 20 batches, and `checkpoint_interval` writes the resumable `ckpt.pt` only halfway and at
+the end (0, the default, saves at every eval as the pretraining runs do); each eval and save prints its time. Writes
+to `<headline out_dir>-yarn4x` as a new wandb run in `curioslm-yarn`; the headline checkpoint is only read.
 
 ## Sample
 

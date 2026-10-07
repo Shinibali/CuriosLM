@@ -27,7 +27,8 @@ n_kv_head: int | None; attention_window: int | None; yarn_factor: int | None; ya
 dropout: float; bias: bool; dataset: str; hf_dataset_repo_id: str; data_mix: dict | None; hf_dataset_repo_template: str
 long_pages: bool
 out_dir: str; init_from: str; extend_from: str; eval_interval: int; log_interval: int; eval_iters: int
-eval_only: bool; always_save_checkpoint: bool; snapshot_interval: int; hf_checkpoint_repo_id: str
+eval_only: bool; always_save_checkpoint: bool; checkpoint_interval: int; snapshot_interval: int
+hf_checkpoint_repo_id: str
 wandb_log: bool; wandb_project: str; wandb_run_name: str
 gradient_accumulation_steps: int; batch_size: int; learning_rate: float; max_iters: int
 weight_decay: float; beta1: float; beta2: float; grad_clip: float
@@ -335,9 +336,12 @@ while True:
     # final checkpoint and final val loss are the fully trained model, not the last eval_interval multiple
     final_iter = iter_num == max_iters
     if (iter_num % eval_interval == 0 or final_iter) and master_process:
+        eval_start = time.time()
         losses = estimate_loss()
+        eval_seconds = time.time() - eval_start  # printed so eval cost is visible apart from training steps
         extra = "".join(f", {split} loss {loss:.4f}" for split, loss in losses.items() if split not in ('train', 'val'))
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}{extra}")
+        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}{extra} "
+              f"(eval {eval_seconds:.1f}s)")
         if wandb_log:
             wandb.log({
                 "tokens": iter_num * tokens_per_iter,
@@ -346,16 +350,21 @@ while True:
                 "val/loss": losses['val'],
                 **{f"{split}/loss": loss for split, loss in losses.items() if split not in ('train', 'val')},
             })
-        if losses['val'] < best_val_loss or always_save_checkpoint or final_iter:
+        # checkpoint_interval > 0 writes the resumable ckpt.pt only every that many steps of this run (and at the
+        # end), not at every eval: each write is the full model plus optimizer state, synchronous, then uploaded
+        save_due = final_iter or not checkpoint_interval or \
+            (iter_num > start_iter and (iter_num - start_iter) % checkpoint_interval == 0)
+        if (losses['val'] < best_val_loss or always_save_checkpoint or final_iter) and save_due:
             best_val_loss = losses['val'].item()
             if iter_num > 0:
-                print(f"saving checkpoint to {out_dir}")
+                save_start = time.time()
                 checkpoints.save(
                     os.path.join(out_dir, 'ckpt.pt'),
                     model=raw_model, optimizer=optimizer, model_args=model_args,
                     iter_num=iter_num, best_val_loss=best_val_loss, config=config,
                     train_loader_state=train_state
                 )
+                print(f"saved checkpoint to {out_dir} ({time.time() - save_start:.1f}s)")
                 # get it off this pod's ephemeral disk immediately; async so a multi-GB
                 # upload never blocks the training loop
                 if hf_checkpoint_repo_id:  # empty disables staging (local smoke tests)
@@ -365,10 +374,10 @@ while True:
     # fine-tune's effect grows with its length); written on top of, not instead of, the resumable ckpt.pt
     if snapshot_interval and iter_num > start_iter and (iter_num - start_iter) % snapshot_interval == 0 \
             and master_process:
-        snapshot = f'ckpt-{iter_num}.pt'
+        snapshot, save_start = f'ckpt-{iter_num}.pt', time.time()
         checkpoints.save(os.path.join(out_dir, snapshot), model=raw_model, optimizer=None, model_args=model_args,
                          iter_num=iter_num, best_val_loss=best_val_loss, config=config)
-        print(f"saved snapshot {out_dir}/{snapshot}")
+        print(f"saved snapshot {out_dir}/{snapshot} ({time.time() - save_start:.1f}s)")
         if hf_checkpoint_repo_id:
             checkpoints.upload_checkpoint_async(out_dir, hf_checkpoint_repo_id, filename=snapshot)
     if iter_num == 0 and eval_only:

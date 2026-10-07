@@ -28,10 +28,17 @@ batch_size = tokens_per_micro_batch // block_size
 long_pages = True  # one page per sequence, so the model has a reason to look far back
 
 # Length: the LR continues the headline schedule, which ended at min_lr (lr_decay_iters is unchanged, so get_lr
-# returns min_lr from here on); no new warmup. Evals keep the headline run's cadence as a share of the run.
-eval_interval = study.finetune_steps * eval_interval // max_iters
+# returns min_lr from here on); no new warmup.
 max_iters += study.finetune_steps
 snapshot_interval = study.snapshot_interval
+
+# Cadence: in-run eval is only a health check (07_yarn_context.py on 500 held-out pages is the measurement), so
+# evaluate where snapshots are taken, on fewer batches; the first run evaluated 100 batches every 10 steps, more
+# tokens than it trained on in between, and evals plus saves took ~70% of its time.
+eval_interval = snapshot_interval
+eval_iters = 20  # 300 pages per split: enough to catch a spike
+checkpoint_interval = study.finetune_steps // 2  # resumable ckpt.pt halfway and at the end, not at every eval
+log_interval = snapshot_interval // 5  # most logged steps aren't eval steps, so MFU and throughput get measured
 
 out_dir = f'{extend_from}-yarn{yarn_factor:g}x'
 wandb_project = 'curioslm-yarn'
