@@ -43,6 +43,20 @@ def apply():
     })
 
 
+def mark_uniform_loss(ax, label=True):
+    """A dashed line at ln(vocabulary size): the loss of a uniform guess over GPT-2's tokens, where an untrained model
+    starts (slightly above it, since random weights aren't perfectly uniform). The size comes from the tokenizer."""
+    import math
+    import tiktoken
+    vocabulary = tiktoken.get_encoding("gpt2").n_vocab  # 50,257
+    loss = math.log(vocabulary)
+    ax.axhline(loss, color=INK_SECONDARY, linewidth=0.9, linestyle="--", zorder=1)
+    if label:
+        ax.text(1, loss, f"uniform guess over {vocabulary:,} tokens: ln {vocabulary:,} = {loss:.2f}  ", ha="right",
+                va="bottom", fontsize=8.5, color=INK_SECONDARY, transform=ax.get_yaxis_transform())
+    return loss
+
+
 def spread_labels(ys, min_gap):
     """Nudge direct-label positions apart so near-identical lines don't print on top of each other."""
     order = sorted(range(len(ys)), key=lambda i: ys[i])  # label indices, lowest y first

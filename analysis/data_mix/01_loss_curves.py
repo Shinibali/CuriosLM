@@ -44,24 +44,29 @@ def main():
     if args.refresh or not os.path.exists(HISTORY_CSV):
         fetch()
     with open(HISTORY_CSV) as f:
-        rows = [r for r in csv.DictReader(f) if int(r["iter"]) > 0]  # iter 0 is the untrained model
+        rows = list(csv.DictReader(f))  # from iter 0, the untrained model
 
     style.apply()
     sets = mix.val_sets()
     fig, axes = plt.subplots(1, len(sets), figsize=(10, 3.8))
     for ax, dataset in zip(axes, sets):
+        ends = []  # (tokens, final loss) per curve, labelled after both are drawn
         for (path, label), color in (((mix.BASE, mix.LABELS[mix.BASE]), style.MODEL_B),
                                      ((mix.MIX, mix.LABELS[mix.MIX]), style.MODEL_B_MIX)):
             pts = sorted((float(r["tokens"]) / 1e9, float(r["loss"])) for r in rows
                          if r["run"] == path and r["key"] == mix.val_key(dataset))
             if pts:
                 ax.plot([p[0] for p in pts], [p[1] for p in pts], "o-", markersize=3, color=color, label=label)
-                ax.text(pts[-1][0], pts[-1][1], f"  {pts[-1][1]:.3f}", va="center", fontsize=8.5, color=style.INK)
+                ends.append(pts[-1])
+        label_gap = 0.045 * (ax.get_ylim()[1] - ax.get_ylim()[0])  # close finals would print on top of each other
+        for (x, y), placed in zip(ends, style.spread_labels([y for _, y in ends], label_gap)):
+            ax.text(x, placed, f"  {y:.3f}", va="center", fontsize=8.5, color=style.INK)
+        style.mark_uniform_loss(ax, label=dataset == sets[0])  # labelled once
         ax.set_title(f"Validation loss on {mix.display(dataset)}", fontsize=10)
         ax.set_xlabel("Tokens seen (billions)")
         ax.set_xlim(0, ax.get_xlim()[1] * 1.12)  # room for the end labels
     axes[0].set_ylabel("Validation loss")
-    axes[0].legend(loc="upper right", fontsize=8.5)
+    axes[0].legend(loc="center right", fontsize=8.5)  # the empty middle: the uniform-guess label sits top right
     fig.text(0.01, 0.99, "Swapping half the data: a small loss on one set, a large gain on the other", fontsize=12,
              fontweight="bold", va="top")
     fig.subplots_adjust(top=0.82, bottom=0.14, left=0.07, right=0.98, wspace=0.2)

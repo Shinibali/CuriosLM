@@ -30,8 +30,9 @@ def main():
         os.makedirs(headline.DATA, exist_ok=True)
         runs.fetch(paths, ["iter", "tokens", "val/loss"], headline.CONFIG_KEYS, HISTORY_CSV, CONFIG_JSON)
     history, _ = runs.load(paths, HISTORY_CSV, CONFIG_JSON)
-    curves = {p: sorted((r["tokens"], r["val/loss"]) for r in rows if r["iter"] > 0)  # iter 0 is the untrained model
-              for p, rows in history.items()}
+    full = {p: sorted((r["tokens"], r["val/loss"]) for r in rows) for p, rows in history.items()}  # from iter 0
+    curves = {p: [point for point in points if point[0] > 0] for p, points in full.items()}  # trained evals only:
+    # the gap and the noise compare trained models, so the untrained iter 0 stays out of them
 
     a, b = (curves[p] for _, p in RUNS)
     assert [t for t, _ in a] == [t for t, _ in b], "the two runs must be evaluated at the same token counts"
@@ -41,10 +42,12 @@ def main():
 
     style.apply()
     fig, (top, bottom) = plt.subplots(2, 1, figsize=(8, 6.2), sharex=True, gridspec_kw={"height_ratios": [3, 2]})
-    for (label, path), color in zip(RUNS, style.SERIES):
-        top.plot(tokens, [l for _, l in curves[path]], color=color, label=label, marker="o", markersize=3)
+    for (label, path), color in zip(RUNS, style.SERIES):  # from the untrained model at iter 0
+        top.plot([t / 1e9 for t, _ in full[path]], [l for _, l in full[path]], color=color, label=label, marker="o",
+                 markersize=3)
+    style.mark_uniform_loss(top)
     top.set_ylabel("Validation loss")
-    top.legend(loc="upper right", fontsize=8.5)
+    top.legend(loc="center right", fontsize=8.5)  # the empty middle: the uniform-guess label sits top right
 
     bottom.axhspan(-noise, noise, color=style.GRID, alpha=0.6, linewidth=0, zorder=0)  # differences in here are noise
     bottom.axhline(0, color=style.INK_SECONDARY, linewidth=0.8, zorder=1)
@@ -53,6 +56,7 @@ def main():
                 color=style.INK_SECONDARY)
     bottom.set_ylabel("Gap, B − A")
     bottom.set_xlabel("Tokens seen (billions)")
+    bottom.set_xlim(left=0)  # the axes share x: training starts at 0 tokens, with no padding before it
 
     fig.text(0.02, 0.985, "Same loss by the end", fontsize=12, fontweight="bold", va="top")
     fig.text(0.02, 0.945, f"Gemma-style leads by {-min(gap):.3f} early; after {tokens[-1]:.1f}B tokens the gap is "
