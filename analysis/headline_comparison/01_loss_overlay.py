@@ -59,7 +59,7 @@ def main():
     bottom.set_xlim(left=0)  # the axes share x: training starts at 0 tokens, with no padding before it
 
     fig.text(0.02, 0.985, "Same loss by the end", fontsize=12, fontweight="bold", va="top")
-    fig.text(0.02, 0.945, f"Gemma-style leads by {-min(gap):.3f} early; after {tokens[-1]:.1f}B tokens the gap is "
+    fig.text(0.02, 0.945, f"Gemma 3-style leads by {-min(gap):.3f} early; after {tokens[-1]:.1f}B tokens the gap is "
              f"{gap[-1]:+.3f}, inside run-to-run noise.", fontsize=9.5, color=style.INK_SECONDARY, va="top")
     fig.subplots_adjust(left=0.1, right=0.97, top=0.88, bottom=0.09, hspace=0.08)
     os.makedirs(headline.FIGURES, exist_ok=True)

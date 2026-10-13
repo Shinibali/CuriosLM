@@ -18,7 +18,7 @@ from common import run_ids  # noqa: E402
 
 # Choices: the two headline runs (wandb run paths) in plotting order, with their labels.
 MODEL_A, MODEL_B = run_ids.HEADLINE_A, run_ids.HEADLINE_B
-LABELS = {MODEL_A: "124M GPT-2 (Model A)", MODEL_B: "113M Gemma-style (Model B)"}
+LABELS = {MODEL_A: "124M GPT-2 (Model A)", MODEL_B: "113M Gemma 3-style (Model B)"}
 REFERENCE = "gpt2"  # OpenAI's GPT-2 small, loaded through the eval adapter
 NOISE_RUNS = (run_ids.LADDER_A4, run_ids.LADDER_A4_SEED2)  # one 1.5B-token Gemma-style run, two seeds
 CONFIG_KEYS = ["out_dir", "dataset"]  # what 01 fetches from each run's wandb config

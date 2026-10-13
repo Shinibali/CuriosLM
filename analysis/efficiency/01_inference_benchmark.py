@@ -26,7 +26,7 @@ from common import models, run_ids, runs, style  # noqa: E402
 DATA, FIGURES = os.path.join(HERE, "data"), os.path.join(HERE, "figures")
 CONFIG_JSON = os.path.join(DATA, "run_configs.json")
 # Choices: which runs, and the measurement grid.
-RUNS = [("124M GPT-2 (Model A)", run_ids.HEADLINE_A), ("113M Gemma-style (Model B)", run_ids.HEADLINE_B)]
+RUNS = [("124M GPT-2 (Model A)", run_ids.HEADLINE_A), ("113M Gemma 3-style (Model B)", run_ids.HEADLINE_B)]
 PROMPT_LENS = (128, 512)  # decode: prompt length before generating
 NEW_TOKENS = 256  # decode: tokens generated per run (prompt + new must fit in block_size)
 PREFILL_LENS = (128, 512, 1024)  # prefill: one forward pass over this many tokens

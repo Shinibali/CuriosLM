@@ -38,7 +38,7 @@ RUNS_JSON = os.path.join(DATA, "flops_runs.json")
 OUT_CSV = os.path.join(DATA, "flops.csv")
 OUT_PNG = os.path.join(FIGURES, "flops.png")
 # Choices: which runs (the headline pair), and the components the figure separates
-RUNS = [("Model A (GPT-2)", run_ids.HEADLINE_A), ("Model B (Gemma-style)", run_ids.HEADLINE_B)]
+RUNS = [("Model A (GPT-2)", run_ids.HEADLINE_A), ("Model B (Gemma 3-style)", run_ids.HEADLINE_B)]
 COMPONENTS = ("attention projections", "attention scores", "MLP", "output layer")
 CONFIG_KEYS = ("out_dir", "batch_size", "gradient_accumulation_steps", "block_size", "max_iters")
 
@@ -154,7 +154,7 @@ def main():
     ax.grid(axis="y", visible=False)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=4, fontsize=8.5)
     fig.text(0.02, 0.97, "Where the FLOPs go, per token", fontsize=12, fontweight="bold", va="top")
-    fig.subplots_adjust(left=0.22, right=0.97, top=0.82, bottom=0.36)
+    fig.subplots_adjust(left=0.25, right=0.97, top=0.82, bottom=0.36)  # left: room for the longest model label
     os.makedirs(FIGURES, exist_ok=True)
     fig.savefig(OUT_PNG, dpi=200)
     print(f"wrote {OUT_CSV}, {OUT_PNG}")

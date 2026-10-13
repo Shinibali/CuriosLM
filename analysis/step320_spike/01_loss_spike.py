@@ -24,7 +24,7 @@ OUT = os.path.join(page.FIGURES, "loss_spike.png")
 # also means two warmups) and 2 vs 4 GPUs. Only the data order is shared.
 RUNS = [
     ("124M GPT-2, 1.5B-token run", run_ids.LADDER_A0),
-    ("113M Gemma-style, 1.5B-token run", run_ids.LADDER_A4),
+    ("113M Gemma 3-style, 1.5B-token run", run_ids.LADDER_A4),
     ("124M GPT-2, 9.8B-token run", run_ids.HEADLINE_A),
 ]
 COLORS = [style.MODEL_A, style.MODEL_B, style.MODEL_A_DARK]  # in RUNS order: the model's colour, darker for its long run

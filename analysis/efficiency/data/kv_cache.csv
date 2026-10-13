@@ -15,19 +15,19 @@ model,seq_len,measured_mb,formula_mb
 124M GPT-2 (Model A),896,66.060288,66.060288
 124M GPT-2 (Model A),960,70.77888,70.77888
 124M GPT-2 (Model A),1024,75.497472,75.497472
-113M Gemma-style (Model B),64,1.179648,1.179648
-113M Gemma-style (Model B),128,2.359296,2.359296
-113M Gemma-style (Model B),192,3.538944,3.538944
-113M Gemma-style (Model B),256,4.718592,4.718592
-113M Gemma-style (Model B),320,5.89824,5.89824
-113M Gemma-style (Model B),384,7.077888,7.077888
-113M Gemma-style (Model B),448,8.257536,8.257536
-113M Gemma-style (Model B),512,9.42336,9.42336
-113M Gemma-style (Model B),576,9.718272,9.718272
-113M Gemma-style (Model B),640,10.013184,10.013184
-113M Gemma-style (Model B),704,10.308096,10.308096
-113M Gemma-style (Model B),768,10.603008,10.603008
-113M Gemma-style (Model B),832,10.89792,10.89792
-113M Gemma-style (Model B),896,11.192832,11.192832
-113M Gemma-style (Model B),960,11.487744,11.487744
-113M Gemma-style (Model B),1024,11.782656,11.782656
+113M Gemma 3-style (Model B),64,1.179648,1.179648
+113M Gemma 3-style (Model B),128,2.359296,2.359296
+113M Gemma 3-style (Model B),192,3.538944,3.538944
+113M Gemma 3-style (Model B),256,4.718592,4.718592
+113M Gemma 3-style (Model B),320,5.89824,5.89824
+113M Gemma 3-style (Model B),384,7.077888,7.077888
+113M Gemma 3-style (Model B),448,8.257536,8.257536
+113M Gemma 3-style (Model B),512,9.42336,9.42336
+113M Gemma 3-style (Model B),576,9.718272,9.718272
+113M Gemma 3-style (Model B),640,10.013184,10.013184
+113M Gemma 3-style (Model B),704,10.308096,10.308096
+113M Gemma 3-style (Model B),768,10.603008,10.603008
+113M Gemma 3-style (Model B),832,10.89792,10.89792
+113M Gemma 3-style (Model B),896,11.192832,11.192832
+113M Gemma 3-style (Model B),960,11.487744,11.487744
+113M Gemma 3-style (Model B),1024,11.782656,11.782656

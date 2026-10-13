@@ -22,7 +22,7 @@ sys.path[:0] = [os.path.dirname(HERE), ROOT]  # analysis/ for common, the repo r
 from common import models, run_ids, runs  # noqa: E402
 
 DATA = os.path.join(HERE, "data")
-LABELS = {"124M GPT-2 (Model A)": run_ids.HEADLINE_A, "113M Gemma-style (Model B)": run_ids.HEADLINE_B}  # as in 01
+LABELS = {"124M GPT-2 (Model A)": run_ids.HEADLINE_A, "113M Gemma 3-style (Model B)": run_ids.HEADLINE_B}  # as in 01
 BYTES = 4  # float32, the dtype 01 measured in
 
 
