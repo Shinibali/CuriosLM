@@ -24,6 +24,9 @@ TOKENS_CSV = os.path.join(page.DATA, "token_losses.csv")
 WORDS_CSV = os.path.join(page.DATA, "word_losses.csv")
 EXCERPT_START = "Of "  # the excerpt runs from the page's first full sentence to the end of its paragraph
 LOSS_MAX = 12.0        # colour ceiling (nats) for the per-token view; the few tokens above it take the darkest shade
+# Choice: the page's topic is sensitive and the post doesn't name it, so the two words that would reveal it are left
+# out of the figure's rows. Every total (the subtitle's nats, the CSVs) still counts them.
+NOT_SHOWN = {"killed", "strangulation"}
 
 
 def excerpt(text):
@@ -97,6 +100,7 @@ def main():
 
     # figure: one row per distinct changed word (first occurrence), clean vs mangled loss
     rows = list({(c[0], m[0]): (c, m) for c, m in reversed(changed)}.values())[::-1]  # dedupe, keep first occurrence
+    rows = [(c, m) for c, m in rows if c[0] not in NOT_SHOWN]  # see NOT_SHOWN
     style.apply()
     fig, ax = plt.subplots(figsize=(6.5, 0.34 * len(rows) + 0.6))
     clean_color, mangled_color = style.GOOD, style.BAD
