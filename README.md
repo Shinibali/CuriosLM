@@ -133,8 +133,18 @@ private-storage quota; the repo holds roughly one checkpoint per run. `init_from
 as does `init_from='extend'` for the run it continues; snapshots (`snapshot_interval`) are uploaded beside `ckpt.pt`.
 `init_from='scratch'` and `'extend'` refuse to start if `out_dir` already holds a *different* run's checkpoint
 (compared by `wandb_run_name`), so an `out_dir` collision fails loudly rather than silently
-overwriting. Separate from the polished, public model repos, which get pushed by hand with a
-model card when a headline model is finalized.
+overwriting. Separate from the polished, public model repos (below).
+
+## Public model repos
+
+```bash
+uv run python scripts/export_hf.py [--only <repo name>]
+```
+Writes one folder per public repo under `out-release/` (gitignored): weights only, as `model.safetensors`, a
+`config.json` and a `README.md` model card whose numbers come from the checkpoint and the analysis studies' result
+tables. Model A is converted to the 🤗 transformers GPT-2 format; the Gemma-style models keep CuriosLM's format. Each
+export is reloaded and its logits checked against the original checkpoint's. Upload is by hand:
+`hf upload CuriosLM/<repo name> out-release/<repo name> .`
 
 ## GPU pods
 
