@@ -141,6 +141,8 @@ class CausalSelfAttention(nn.Module):
 
         self.rope = RotaryEmbedding(self.head_size, config.block_size, config.rope_theta,
                                     config.yarn_factor, config.yarn_original_context) if config.use_rope else None 
+        self.capture_attention = False  # eval only: compute attention explicitly and keep its probabilities
+        self.last_attention = None  # (B, n_head, T, T), from the latest forward with capture_attention on
         
     def _flex_block_mask(self, T, device):
         key = (T, str(device))
@@ -197,6 +199,11 @@ class CausalSelfAttention(nn.Module):
                 kv_cache.k[self.layer_idx] = k[:,:,-keep:]
                 kv_cache.v[self.layer_idx] = v[:,:,-keep:]
 
+        elif self.capture_attention:
+            # explicit softmax(q·kᵀ/√h + mask): the fused kernels below do not expose the probabilities
+            assert not self.training, "capture_attention is for inspection; it skips dropout"
+            y, self.last_attention = self._attention_with_weights(q, k, v) # y (B, n_head, T, hs), attn (B, n_head, T, T)
+
         elif self.is_global_layer: 
             # no cache (training / eval) unchanged
             y = F.scaled_dot_product_attention(q, k, v, is_causal=True, dropout_p=self.dropout if self.training else 0, enable_gqa=self.enable_gqa) # B, nh, T, hs
@@ -211,6 +218,32 @@ class CausalSelfAttention(nn.Module):
 
         y = self.resid_dropout(self.c_proj(y))
         return y
+
+
+    def _attention_with_weights(self, q, k, v):
+        """Attention computed step by step, for inspection.
+        q: (B, n_head, T, hs); k, v: (B, n_kv_head, T, hs), already rotated by RoPE when the model uses it.
+        Returns y (B, n_head, T, hs) and the attn = probabilities (B, n_head, T, T): row t is query t's distribution
+        over the keys it may attend to."""
+
+        # GQA: give every query head the key/value head (B, n_kv_head, T, hs) it shares
+        group = self.n_head // self.num_kv_heads  # query heads per key/value head
+        k = k.repeat_interleave(group, dim=1)  # [k0, k1, k2] -> [k0, k0, k0, k0, k1, ...]
+        v = v.repeat_interleave(group, dim=1)  # same as k
+        # now k, v (B, n_head, T, hs) like q
+
+        attn = q @ k.transpose(-1,-2) / math.sqrt(k.size(-1))  # (B, n_head, T, T)
+
+        T = q.size(-2)  # q is (B, n_head, T, hs)
+        if self.is_global_layer:
+            positions = torch.arange(T, device=q.device)
+            allowed = positions[None, :] <= positions[:, None]  # (T, T) key col position <= query row position
+        else:
+            allowed = self.window_mask[:T, :T]  # the causal + window buffer
+        attn = attn.masked_fill(allowed == 0, float('-inf'))  # (B, n_head, T, T) mask where true so we put −∞ on upper non-causal triangle or other relevant segments of local mask
+
+        attn = attn.softmax(dim=-1)  # (B, n_head, T, T)
+        return attn @ v, attn  # y (B, n_head, T, hs), attn (B, n_head, T, T)
 
 
 class MLP(nn.Module):
@@ -327,6 +360,23 @@ class GPT(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if isinstance(module, nn.Linear) and module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
+
+    @torch.no_grad()
+    def attention_weights(self, idx):
+        """Every layer's attention probabilities for idx: a list with one (B, n_head, T, T) tensor per layer, from the
+        explicit path. Each layer's switch is turned back off afterwards, so the model's normal forward is unchanged."""
+        assert not self.training, "attention_weights is for inspection: call model.eval() first"
+        layers = [block.attn for block in self.transformer.h]
+        for layer in layers:
+            layer.capture_attention = True
+        try:
+            self(idx)
+            weights = [layer.last_attention for layer in layers] # attn (B, n_head, T, T)
+        finally:
+            for layer in layers:
+                layer.capture_attention, layer.last_attention = False, None
+        return weights # attn (B, n_head, T, T)
+
 
     def new_kv_cache(self, batch_size, device):
         return KVCache(self.config.n_layer)  # one slot per layer; batch_size/device unused while the cache grows by cat
