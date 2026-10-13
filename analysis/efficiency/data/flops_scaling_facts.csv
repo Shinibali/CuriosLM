@@ -7,3 +7,7 @@ Chinchilla-optimal params for Model A's compute (millions),255.69376371464364
 Chinchilla-optimal tokens for Model A's compute (billions),5.113875274292872
 sequences per optimizer step (ours),480
 "sequences of 1,024 tokens per GPT-3 batch",3125.0
+"PaLM-formula FLOPs / useful FLOPs, Model A's recipe, ~7B, 1,024 tokens",1.0200209182786142
+"PaLM-formula FLOPs / useful FLOPs, Model A's recipe, ~7B, 131,072 tokens",1.7210463456492682
+"PaLM-formula FLOPs / useful FLOPs, Model B's recipe, ~7B, 1,024 tokens",1.0270473982204054
+"PaLM-formula FLOPs / useful FLOPs, Model B's recipe, ~7B, 131,072 tokens",3.9268218409088353

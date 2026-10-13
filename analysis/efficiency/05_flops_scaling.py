@@ -9,6 +9,9 @@
    while d·L < V/8.
 4. Training-budget facts: the embedding share of parameters, the Chinchilla-optimal size for Model A's compute, and
    how many sequences one bad page competes with per step, here and at GPT-3's batch size.
+5. How far the PaLM MFU formula (6N + 12·L·d·T training FLOPs per token, the one train.py logs) overstates the FLOPs
+   a model computes, for both recipes at a ~7B size and both contexts: it charges full attention over T for every
+   token, where a causal layer computes about half that and a local layer only its window.
 
     uv run --extra analysis python analysis/efficiency/05_flops_scaling.py
 Needs 02's data (flops_runs.json, flops.csv) and both checkpoints. Writes data/flops_scaling.csv,
@@ -168,6 +171,21 @@ def training_facts():
     return facts
 
 
+def palm_overstatement():
+    """(fact, value) rows: the PaLM formula's training FLOPs per token over the useful count, for each recipe at the
+    ~7B size and both contexts. The logged MFU is the useful MFU times this ratio."""
+    facts = []
+    for recipe_name, model_recipe in (("Model A's recipe", None), ("Model B's recipe", model_b_recipe())):
+        for context in (SHORT_CONTEXT, LONG_CONTEXT):
+            config = recipe_config(model_recipe, SEVEN_B, context)
+            with torch.device("meta"), contextlib.redirect_stdout(io.StringIO()):  # no memory, no size printout
+                non_embedding_params = GPT(config).get_num_params()  # the N that train.py's estimate_mfu uses
+            palm = 6 * non_embedding_params + 12 * config.n_layer * config.n_embd * context
+            useful = 3 * sum(models.forward_flops_formula(config).values())  # training = 3 × forward
+            facts.append((f"PaLM-formula FLOPs / useful FLOPs, {recipe_name}, ~7B, {context:,} tokens", palm / useful))
+    return facts
+
+
 def main():
     os.makedirs(DATA, exist_ok=True)
     os.makedirs(FIGURES, exist_ok=True)
@@ -181,7 +199,7 @@ def main():
     print(f"crossovers: attention passes the MLP at T ≈ 8d = {8 * small_width:,} tokens at d = {small_width}, "
           f"{8 * SEVEN_B['n_embd']:,} at d = {SEVEN_B['n_embd']}; the output layer outweighs all MLPs while "
           f"d·L < V/8 = {VOCAB / 8:,.0f} (GPT-2 small: d·L = {small_width * small_layers:,})")
-    facts = training_facts()
+    facts = training_facts() + palm_overstatement()
     for name, value in facts:
         print(f"  {name}: {value:,.3f}")
     with open(os.path.join(DATA, "flops_scaling.csv"), "w", newline="") as f:
