@@ -28,11 +28,11 @@ main() {
     # git asks this helper for credentials on demand, so the token is read from the env, never written to disk.
     git config --global credential.helper '!f() { echo username=Shinibali; echo "password=$GITHUB_TOKEN"; }; f'
 
-    local repo=/workspace/gpt-from-scratch-notes
+    local repo=/workspace/CuriosLM
     if [ ! -d "$repo" ]; then
-        git clone https://github.com/Shinibali/gpt-from-scratch-notes.git "$repo"
+        git clone https://github.com/Shinibali/CuriosLM.git "$repo"
     fi
-    cd "$repo/shinibali/karpathy-tutorials/CuriosLM"
+    cd "$repo"
     git pull --ff-only
 
     uv sync --locked

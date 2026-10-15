@@ -1,8 +1,11 @@
 # CuriosLM
 
-From-scratch GPT-2 → Gemma architecture ladder: a small language model built up rung by rung
+From-scratch GPT-2 → Gemma 3-style architecture ladder: a small language model built up rung by rung
 (RoPE, GQA, GeGLU + sandwich norm, local/global sliding-window attention) from a vanilla
 nanoGPT-style baseline.
+
+The write-ups: [Part 1, pretraining](https://shinibali.github.io/gpt2-to-gemma-part-1/) and
+[Part 2, inference, positions, attention and context extension](https://shinibali.github.io/gpt2-to-gemma-part-2/).
 
 This repo is self-contained — cloning it and running the commands below is everything needed
 to set it up.
@@ -10,7 +13,7 @@ to set it up.
 ## First-time environment setup (new clone, or a new machine)
 
 ```bash
-git clone <this-repo-url>
+git clone https://github.com/Shinibali/CuriosLM.git
 cd CuriosLM
 uv sync
 ```
@@ -178,3 +181,7 @@ Scripts that turn runs and checkpoints into figures live in `analysis/`, one fol
 uv run --extra eval python -m pytest -q
 ```
 The eval-adapter tests need the `eval` extra and are skipped without it.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The trained models on the Hugging Face Hub use the same license.
