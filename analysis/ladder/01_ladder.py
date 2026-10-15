@@ -109,7 +109,7 @@ def main():
             color=style.INK_SECONDARY)
     ax.set_xticks(list(xs), labels[1:], fontsize=8.5)
     ax.set_xlim(-0.5, len(steps) - 0.5)
-    ax.set_ylabel("Change in validation loss\nvs previous rung (↓ better)")
+    ax.set_ylabel("Change in validation loss\nvs previous rung")
     ax.grid(axis="x", visible=False)
     fig.text(0.02, 0.98, "Only RoPE clearly moves the loss", fontsize=12, fontweight="bold", va="top")
     fig.text(0.02, 0.92, f"Each rung adds one change to the one before. Highlighted: steps over {ladder.CLEAR}× the seed-to-seed gap.", fontsize=9.5,
