@@ -42,6 +42,12 @@ RELEASES = {
 DATASETS = {"fineweb_edu": ("HuggingFaceFW/fineweb-edu", "sample-10BT"),
             "cosmopedia_v2": ("HuggingFaceTB/smollm-corpus", "cosmopedia-v2")}
 LICENSE = "mit"  # the code it's built on (nanoGPT) is MIT
+CODE_URL = "https://github.com/Shinibali/CuriosLM"
+WRITEUPS = {"Part 1, pretraining": "https://shinibali.github.io/gpt2-to-gemma-part-1/",
+            "Part 2, inference, positions, attention and context extension":
+                "https://shinibali.github.io/gpt2-to-gemma-part-2/"}
+READ_MORE = ("Read more in the write-up, " + " and ".join(f"[{title}]({url})" for title, url in WRITEUPS.items())
+             + f"; the code is at [Shinibali/CuriosLM]({CODE_URL}).")
 HEADLINE_DATA = os.path.join(ROOT, "analysis", "headline_comparison", "data")
 MIX_DATA = os.path.join(ROOT, "analysis", "data_mix", "data")
 YARN_CONTEXT_CSV = os.path.join(ROOT, "analysis", "positions", "data", "yarn_context.csv")
@@ -251,7 +257,7 @@ def model_card(name, fmt, checkpoint, model_args):
              "- research\n---", "", f"# {ORG}/{name}", "", SUMMARIES[name], "",
              "A small research model from the CuriosLM project, released for reproducibility and study. It is a "
              "base model: not instruction-tuned and not safety-tuned, so it can produce false, biased or "
-             "nonsensical text.", "", "## Architecture", ""]
+             "nonsensical text.", "", READ_MORE, "", "## Architecture", ""]
     lines += [f"- {line}" for line in architecture_lines(model_args)]
     lines += ["", "## Training", ""] + training + ["", "## Results", "", *table, "", how, "", "## Usage", ""]
     lines += usage(name, fmt)
